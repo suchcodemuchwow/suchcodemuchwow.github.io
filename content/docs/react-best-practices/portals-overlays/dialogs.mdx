@@ -1,0 +1,834 @@
+---
+title: Dialog Patterns
+description: Implement confirmation dialogs, alerts, and prompts with proper accessibility and user experience patterns.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## Dialog Types
+
+Dialogs are modal overlays for specific interaction patterns. They differ from general modals in their focused purpose.
+
+| Type | Purpose | User Action |
+|------|---------|-------------|
+| Alert | Inform user of important information | Acknowledge |
+| Confirmation | Verify destructive or significant action | Confirm or cancel |
+| Prompt | Collect single input from user | Submit or cancel |
+
+## When to Use Dialogs
+
+| Use Case | Dialog Type |
+|----------|-------------|
+| Delete confirmation | Confirmation |
+| Unsaved changes warning | Confirmation |
+| Error notification | Alert |
+| Success acknowledgment | Alert |
+| Quick rename input | Prompt |
+| Session timeout warning | Alert with action |
+
+## When NOT to Use Dialogs
+
+| Situation | Alternative |
+|-----------|-------------|
+| Non-critical notifications | Toast or inline message |
+| Multiple form fields | Full modal or page |
+| Frequent confirmations | Undo action instead |
+| Information that can be dismissed | Banner or inline |
+| Mobile primary flows | Full-screen page |
+
+<Callout type="info">
+For destructive actions, consider implementing undo functionality instead of confirmation dialogs. It's less disruptive and more user-friendly.
+</Callout>
+
+## Alert Dialog
+
+Alert dialogs inform users about important information that requires acknowledgment.
+
+```tsx
+import { createPortal } from 'react-dom';
+import { useRef, useEffect, ReactNode } from 'react';
+
+interface AlertDialogProps {
+  open: boolean;
+  onClose: () => void;
+  title: string;
+  message: string;
+  confirmLabel?: string;
+}
+
+function AlertDialog({
+  open,
+  onClose,
+  title,
+  message,
+  confirmLabel = 'OK',
+}: AlertDialogProps) {
+  const buttonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (open) {
+      buttonRef.current?.focus();
+    }
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  return createPortal(
+    <div className="dialog-backdrop" role="presentation">
+      <div
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="alert-title"
+        aria-describedby="alert-message"
+        className="dialog-content"
+      >
+        <h2 id="alert-title">{title}</h2>
+        <p id="alert-message">{message}</p>
+        <div className="dialog-actions">
+          <button ref={buttonRef} type="button" onClick={onClose}>
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+```
+
+### Usage
+
+```tsx
+function App() {
+  const [showAlert, setShowAlert] = useState(false);
+
+  return (
+    <>
+      <button onClick={() => setShowAlert(true)}>
+        Show Error
+      </button>
+
+      <AlertDialog
+        open={showAlert}
+        onClose={() => setShowAlert(false)}
+        title="Connection Error"
+        message="Unable to connect to the server. Please check your internet connection and try again."
+      />
+    </>
+  );
+}
+```
+
+## Confirmation Dialog
+
+Confirmation dialogs verify user intent before proceeding with significant actions.
+
+```tsx
+import { createPortal } from 'react-dom';
+import { useRef, useEffect, useCallback } from 'react';
+
+interface ConfirmDialogProps {
+  open: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+  title: string;
+  message: string;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  danger?: boolean;
+}
+
+function ConfirmDialog({
+  open,
+  onConfirm,
+  onCancel,
+  title,
+  message,
+  confirmLabel = 'Confirm',
+  cancelLabel = 'Cancel',
+  danger = false,
+}: ConfirmDialogProps) {
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  const confirmRef = useRef<HTMLButtonElement>(null);
+
+  // Focus cancel button by default (safer option)
+  useEffect(() => {
+    if (open) {
+      cancelRef.current?.focus();
+    }
+  }, [open]);
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onCancel();
+      }
+    },
+    [onCancel]
+  );
+
+  if (!open) return null;
+
+  return createPortal(
+    <div
+      className="dialog-backdrop"
+      onClick={onCancel}
+      onKeyDown={handleKeyDown}
+      role="presentation"
+    >
+      <div
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="confirm-title"
+        aria-describedby="confirm-message"
+        className="dialog-content"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 id="confirm-title">{title}</h2>
+        <p id="confirm-message">{message}</p>
+
+        <div className="dialog-actions">
+          <button
+            ref={cancelRef}
+            type="button"
+            onClick={onCancel}
+            className="dialog-button-secondary"
+          >
+            {cancelLabel}
+          </button>
+          <button
+            ref={confirmRef}
+            type="button"
+            onClick={onConfirm}
+            className={danger ? 'dialog-button-danger' : 'dialog-button-primary'}
+          >
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+```
+
+<Callout type="warn">
+For destructive actions, focus the cancel button by default. This prevents accidental confirmation via keyboard.
+</Callout>
+
+### Delete Confirmation Example
+
+```tsx
+function DeleteButton({ itemId, itemName }: { itemId: string; itemName: string }) {
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const handleDelete = async () => {
+    setIsDeleting(true);
+    try {
+      await deleteItem(itemId);
+      setShowConfirm(false);
+    } catch (error) {
+      // Handle error
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setShowConfirm(true)}
+        aria-label={`Delete ${itemName}`}
+      >
+        Delete
+      </button>
+
+      <ConfirmDialog
+        open={showConfirm}
+        onConfirm={handleDelete}
+        onCancel={() => setShowConfirm(false)}
+        title="Delete Item"
+        message={`Are you sure you want to delete "${itemName}"? This action cannot be undone.`}
+        confirmLabel={isDeleting ? 'Deleting...' : 'Delete'}
+        cancelLabel="Cancel"
+        danger
+      />
+    </>
+  );
+}
+```
+
+## Prompt Dialog
+
+Prompt dialogs collect a single piece of input from the user.
+
+```tsx
+import { createPortal } from 'react-dom';
+import { useRef, useEffect, useState, FormEvent } from 'react';
+
+interface PromptDialogProps {
+  open: boolean;
+  onSubmit: (value: string) => void;
+  onCancel: () => void;
+  title: string;
+  message?: string;
+  defaultValue?: string;
+  placeholder?: string;
+  submitLabel?: string;
+  cancelLabel?: string;
+  inputType?: 'text' | 'email' | 'url' | 'number';
+  required?: boolean;
+  maxLength?: number;
+}
+
+function PromptDialog({
+  open,
+  onSubmit,
+  onCancel,
+  title,
+  message,
+  defaultValue = '',
+  placeholder,
+  submitLabel = 'Submit',
+  cancelLabel = 'Cancel',
+  inputType = 'text',
+  required = true,
+  maxLength,
+}: PromptDialogProps) {
+  const [value, setValue] = useState(defaultValue);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (open) {
+      setValue(defaultValue);
+      // Delay focus to ensure input is rendered
+      setTimeout(() => {
+        inputRef.current?.focus();
+        inputRef.current?.select();
+      }, 0);
+    }
+  }, [open, defaultValue]);
+
+  const handleSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    if (!required || value.trim()) {
+      onSubmit(value);
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Escape') {
+      onCancel();
+    }
+  };
+
+  if (!open) return null;
+
+  return createPortal(
+    <div
+      className="dialog-backdrop"
+      onClick={onCancel}
+      onKeyDown={handleKeyDown}
+      role="presentation"
+    >
+      <form
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="prompt-title"
+        aria-describedby={message ? 'prompt-message' : undefined}
+        className="dialog-content"
+        onClick={(e) => e.stopPropagation()}
+        onSubmit={handleSubmit}
+      >
+        <h2 id="prompt-title">{title}</h2>
+        {message && <p id="prompt-message">{message}</p>}
+
+        <input
+          ref={inputRef}
+          type={inputType}
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          placeholder={placeholder}
+          required={required}
+          maxLength={maxLength}
+          className="dialog-input"
+        />
+
+        <div className="dialog-actions">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="dialog-button-secondary"
+          >
+            {cancelLabel}
+          </button>
+          <button
+            type="submit"
+            className="dialog-button-primary"
+            disabled={required && !value.trim()}
+          >
+            {submitLabel}
+          </button>
+        </div>
+      </form>
+    </div>,
+    document.body
+  );
+}
+```
+
+### Rename Example
+
+```tsx
+function RenameButton({ item }: { item: { id: string; name: string } }) {
+  const [showPrompt, setShowPrompt] = useState(false);
+
+  const handleRename = async (newName: string) => {
+    await renameItem(item.id, newName);
+    setShowPrompt(false);
+  };
+
+  return (
+    <>
+      <button type="button" onClick={() => setShowPrompt(true)}>
+        Rename
+      </button>
+
+      <PromptDialog
+        open={showPrompt}
+        onSubmit={handleRename}
+        onCancel={() => setShowPrompt(false)}
+        title="Rename Item"
+        message="Enter a new name for this item."
+        defaultValue={item.name}
+        placeholder="Item name"
+        submitLabel="Rename"
+        maxLength={100}
+      />
+    </>
+  );
+}
+```
+
+## Imperative Dialog API
+
+Create a Promise-based API for dialogs to use outside React components.
+
+```tsx
+import { createRoot, Root } from 'react-dom/client';
+
+// Dialog state type
+type DialogResult<T> = T | null;
+
+// Container management
+let dialogRoot: Root | null = null;
+let dialogContainer: HTMLDivElement | null = null;
+
+function getDialogContainer(): { root: Root; container: HTMLDivElement } {
+  if (!dialogContainer) {
+    dialogContainer = document.createElement('div');
+    dialogContainer.id = 'dialog-root';
+    document.body.appendChild(dialogContainer);
+    dialogRoot = createRoot(dialogContainer);
+  }
+  return { root: dialogRoot!, container: dialogContainer };
+}
+
+// Alert function
+export function alert(message: string, title = 'Alert'): Promise<void> {
+  return new Promise((resolve) => {
+    const { root } = getDialogContainer();
+
+    const handleClose = () => {
+      root.render(null);
+      resolve();
+    };
+
+    root.render(
+      <AlertDialog
+        open={true}
+        onClose={handleClose}
+        title={title}
+        message={message}
+      />
+    );
+  });
+}
+
+// Confirm function
+export function confirm(
+  message: string,
+  title = 'Confirm'
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    const { root } = getDialogContainer();
+
+    const handleConfirm = () => {
+      root.render(null);
+      resolve(true);
+    };
+
+    const handleCancel = () => {
+      root.render(null);
+      resolve(false);
+    };
+
+    root.render(
+      <ConfirmDialog
+        open={true}
+        onConfirm={handleConfirm}
+        onCancel={handleCancel}
+        title={title}
+        message={message}
+      />
+    );
+  });
+}
+
+// Prompt function
+export function prompt(
+  message: string,
+  defaultValue = '',
+  title = 'Input'
+): Promise<string | null> {
+  return new Promise((resolve) => {
+    const { root } = getDialogContainer();
+
+    const handleSubmit = (value: string) => {
+      root.render(null);
+      resolve(value);
+    };
+
+    const handleCancel = () => {
+      root.render(null);
+      resolve(null);
+    };
+
+    root.render(
+      <PromptDialog
+        open={true}
+        onSubmit={handleSubmit}
+        onCancel={handleCancel}
+        title={title}
+        message={message}
+        defaultValue={defaultValue}
+      />
+    );
+  });
+}
+```
+
+### Usage
+
+```tsx
+import { confirm, alert, prompt } from './dialogs';
+
+async function handleDelete(item: Item) {
+  const confirmed = await confirm(
+    `Delete "${item.name}"? This cannot be undone.`,
+    'Delete Item'
+  );
+
+  if (confirmed) {
+    await deleteItem(item.id);
+    await alert('Item deleted successfully.', 'Success');
+  }
+}
+
+async function handleRename(item: Item) {
+  const newName = await prompt(
+    'Enter new name:',
+    item.name,
+    'Rename Item'
+  );
+
+  if (newName !== null) {
+    await renameItem(item.id, newName);
+  }
+}
+```
+
+## Dialog Context Provider
+
+Manage dialogs through React context for cleaner component code.
+
+```tsx
+import { createContext, useContext, useState, useCallback, ReactNode } from 'react';
+
+interface DialogContextValue {
+  alert: (message: string, title?: string) => Promise<void>;
+  confirm: (message: string, title?: string) => Promise<boolean>;
+  prompt: (message: string, defaultValue?: string, title?: string) => Promise<string | null>;
+}
+
+const DialogContext = createContext<DialogContextValue | null>(null);
+
+interface DialogState {
+  type: 'alert' | 'confirm' | 'prompt';
+  title: string;
+  message: string;
+  defaultValue?: string;
+  resolve: (value: any) => void;
+}
+
+export function DialogProvider({ children }: { children: ReactNode }) {
+  const [dialog, setDialog] = useState<DialogState | null>(null);
+
+  const alert = useCallback((message: string, title = 'Alert'): Promise<void> => {
+    return new Promise((resolve) => {
+      setDialog({ type: 'alert', title, message, resolve });
+    });
+  }, []);
+
+  const confirm = useCallback((message: string, title = 'Confirm'): Promise<boolean> => {
+    return new Promise((resolve) => {
+      setDialog({ type: 'confirm', title, message, resolve });
+    });
+  }, []);
+
+  const prompt = useCallback(
+    (message: string, defaultValue = '', title = 'Input'): Promise<string | null> => {
+      return new Promise((resolve) => {
+        setDialog({ type: 'prompt', title, message, defaultValue, resolve });
+      });
+    },
+    []
+  );
+
+  const handleClose = (result: any) => {
+    dialog?.resolve(result);
+    setDialog(null);
+  };
+
+  return (
+    <DialogContext.Provider value={{ alert, confirm, prompt }}>
+      {children}
+
+      {dialog?.type === 'alert' && (
+        <AlertDialog
+          open={true}
+          onClose={() => handleClose(undefined)}
+          title={dialog.title}
+          message={dialog.message}
+        />
+      )}
+
+      {dialog?.type === 'confirm' && (
+        <ConfirmDialog
+          open={true}
+          onConfirm={() => handleClose(true)}
+          onCancel={() => handleClose(false)}
+          title={dialog.title}
+          message={dialog.message}
+        />
+      )}
+
+      {dialog?.type === 'prompt' && (
+        <PromptDialog
+          open={true}
+          onSubmit={(value) => handleClose(value)}
+          onCancel={() => handleClose(null)}
+          title={dialog.title}
+          message={dialog.message}
+          defaultValue={dialog.defaultValue}
+        />
+      )}
+    </DialogContext.Provider>
+  );
+}
+
+export function useDialog() {
+  const context = useContext(DialogContext);
+  if (!context) {
+    throw new Error('useDialog must be used within DialogProvider');
+  }
+  return context;
+}
+```
+
+### Usage with Hook
+
+```tsx
+function DeleteButton({ item }: { item: Item }) {
+  const { confirm, alert } = useDialog();
+
+  const handleDelete = async () => {
+    const confirmed = await confirm(
+      `Delete "${item.name}"?`,
+      'Confirm Delete'
+    );
+
+    if (confirmed) {
+      await deleteItem(item.id);
+      await alert('Deleted successfully');
+    }
+  };
+
+  return <button onClick={handleDelete}>Delete</button>;
+}
+```
+
+## Native HTML Dialog Element
+
+Use the native `<dialog>` element for built-in modal behavior.
+
+```tsx
+import { useRef, useEffect, ReactNode } from 'react';
+
+interface NativeDialogProps {
+  open: boolean;
+  onClose: () => void;
+  children: ReactNode;
+}
+
+function NativeDialog({ open, onClose, children }: NativeDialogProps) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+
+    if (open) {
+      dialog.showModal();
+    } else {
+      dialog.close();
+    }
+  }, [open]);
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+
+    const handleClose = () => {
+      onClose();
+    };
+
+    dialog.addEventListener('close', handleClose);
+    return () => dialog.removeEventListener('close', handleClose);
+  }, [onClose]);
+
+  return (
+    <dialog ref={dialogRef} className="native-dialog">
+      {children}
+    </dialog>
+  );
+}
+```
+
+<Callout type="info">
+The native `<dialog>` element provides built-in modal behavior: backdrop, focus trapping, and Escape to close. It reduces the need for custom implementations.
+</Callout>
+
+### Native Dialog Styling
+
+```css
+.native-dialog {
+  border: none;
+  border-radius: 8px;
+  padding: 24px;
+  max-width: 400px;
+}
+
+.native-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.native-dialog:not([open]) {
+  display: none;
+}
+```
+
+## Pros and Cons
+
+| Pros | Cons |
+|------|------|
+| Clear user intent verification | Interrupts user flow |
+| Prevents accidental actions | Can cause "dialog fatigue" |
+| Familiar interaction pattern | Extra clicks for users |
+| Forces conscious decision | Mobile UX challenges |
+| Clear success/error feedback | Can be overused |
+
+## Accessibility Considerations
+
+1. **Use `alertdialog` role**: For dialogs requiring immediate response, use `role="alertdialog"` instead of `role="dialog"`.
+
+2. **Focus the safest action**: For destructive confirmations, focus Cancel by default.
+
+3. **Clear labeling**: Both `aria-labelledby` and `aria-describedby` should be present.
+
+4. **Keyboard support**: Enter to confirm (in forms), Escape to cancel.
+
+5. **Screen reader announcements**: Alert dialogs are announced immediately to assistive technology.
+
+```tsx
+// Correct ARIA for alert dialog
+<div
+  role="alertdialog"
+  aria-modal="true"
+  aria-labelledby="dialog-title"
+  aria-describedby="dialog-description"
+>
+  <h2 id="dialog-title">Confirm Deletion</h2>
+  <p id="dialog-description">
+    This will permanently delete the item. Continue?
+  </p>
+</div>
+```
+
+<Callout type="warn">
+Use `role="alertdialog"` only for time-sensitive or important dialogs. Screen readers may interrupt current reading to announce them.
+</Callout>
+
+## Button Order and Focus
+
+| Action Type | Focus Default | Button Order |
+|-------------|---------------|--------------|
+| Non-destructive | Primary action | [Cancel] [Confirm] |
+| Destructive | Cancel button | [Cancel] [Delete] |
+| Alert | Acknowledge button | [OK] |
+
+```tsx
+// Destructive: focus cancel
+<button ref={cancelRef}>Cancel</button>
+<button className="danger">Delete</button>
+
+// Non-destructive: focus confirm
+<button>Cancel</button>
+<button ref={confirmRef}>Save</button>
+```
+
+## Quick Reference
+
+| Dialog Type | Role | Use Case |
+|-------------|------|----------|
+| Alert | `alertdialog` | Important information |
+| Confirmation | `alertdialog` | Verify user action |
+| Prompt | `dialog` | Collect input |
+
+| Keyboard | Action |
+|----------|--------|
+| `Escape` | Cancel/Close |
+| `Enter` | Submit (in forms) |
+| `Tab` | Navigate between buttons |
+
+| Best Practice | Reason |
+|---------------|--------|
+| Focus safest option | Prevent accidental destructive action |
+| Clear action labels | "Delete" not "OK" for delete confirmation |
+| Explain consequences | User should understand the action |
+| Provide escape route | Always allow cancellation |

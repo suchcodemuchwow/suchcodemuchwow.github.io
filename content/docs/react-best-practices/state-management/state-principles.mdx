@@ -1,0 +1,284 @@
+---
+title: State Principles
+description: Guidelines for managing state in React applications
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## State Location Hierarchy
+
+Choose the right level for your state:
+
+| Level | Use For | Example |
+|-------|---------|---------|
+| **Local** | UI-only state | Form input, open/closed |
+| **Lifted** | Shared between siblings | Selected item in list |
+| **Context** | Deep prop drilling | Theme, auth, locale |
+| **External** | Complex/async state | Server cache, global app state |
+
+```
+Local → Lifted → Context → External Store
+```
+
+<Callout type="info" title="Principle">
+Start with local state. Only lift or externalize when you have a concrete reason.
+</Callout>
+
+---
+
+## Local State
+
+For component-specific UI state:
+
+```tsx
+function Accordion({ items }: Props) {
+  const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
+
+  return (
+    <div>
+      {items.map((item, index) => (
+        <AccordionItem
+          key={item.id}
+          item={item}
+          isExpanded={expandedIndex === index}
+          onToggle={() => setExpandedIndex(
+            expandedIndex === index ? null : index
+          )}
+        />
+      ))}
+    </div>
+  );
+}
+```
+
+### When to Keep Local
+
+- Only one component needs it
+- It doesn't need to persist
+- It doesn't affect other components
+
+---
+
+## Derived State
+
+Compute values from existing state—don't duplicate:
+
+```tsx
+// Bad: Duplicated state
+const [items, setItems] = useState<Item[]>([]);
+const [filteredItems, setFilteredItems] = useState<Item[]>([]); // Don't!
+
+// Good: Derive it
+const [items, setItems] = useState<Item[]>([]);
+const [filter, setFilter] = useState('');
+
+const filteredItems = useMemo(
+  () => items.filter(item => item.name.includes(filter)),
+  [items, filter]
+);
+```
+
+<Callout type="warn" title="Anti-Pattern">
+Storing derived state leads to sync bugs. If you can calculate it, calculate it.
+</Callout>
+
+---
+
+## Lifting State
+
+When siblings need to share state, lift to the common parent:
+
+```tsx
+// Parent owns the state
+function ProductPage() {
+  const [selectedVariant, setSelectedVariant] = useState<Variant | null>(null);
+
+  return (
+    <div>
+      <VariantSelector
+        variants={variants}
+        selected={selectedVariant}
+        onSelect={setSelectedVariant}
+      />
+      <PriceDisplay variant={selectedVariant} />
+      <AddToCartButton variant={selectedVariant} />
+    </div>
+  );
+}
+```
+
+---
+
+## State Reducers
+
+For complex state transitions:
+
+```tsx
+type State = {
+  items: Item[];
+  selectedId: string | null;
+  filter: string;
+};
+
+type Action =
+  | { type: 'SELECT'; id: string }
+  | { type: 'DESELECT' }
+  | { type: 'SET_FILTER'; filter: string }
+  | { type: 'ADD_ITEM'; item: Item }
+  | { type: 'REMOVE_ITEM'; id: string };
+
+function reducer(state: State, action: Action): State {
+  switch (action.type) {
+    case 'SELECT':
+      return { ...state, selectedId: action.id };
+    case 'DESELECT':
+      return { ...state, selectedId: null };
+    case 'SET_FILTER':
+      return { ...state, filter: action.filter };
+    case 'ADD_ITEM':
+      return { ...state, items: [...state.items, action.item] };
+    case 'REMOVE_ITEM':
+      return {
+        ...state,
+        items: state.items.filter(i => i.id !== action.id),
+        selectedId: state.selectedId === action.id ? null : state.selectedId,
+      };
+  }
+}
+
+function ItemManager() {
+  const [state, dispatch] = useReducer(reducer, initialState);
+  // ...
+}
+```
+
+### When to Use useReducer
+
+- Multiple related state values
+- Complex update logic
+- Next state depends on previous state
+- You want to test state logic separately
+
+---
+
+## Initializing State
+
+### Lazy Initialization
+
+For expensive initial values:
+
+```tsx
+// Bad: Runs on every render
+const [data, setData] = useState(parseExpensiveData(rawData));
+
+// Good: Runs only once
+const [data, setData] = useState(() => parseExpensiveData(rawData));
+```
+
+### From Props
+
+Initialize once, then component owns it:
+
+```tsx
+function EditableField({ initialValue }: { initialValue: string }) {
+  const [value, setValue] = useState(initialValue);
+  // Component now owns 'value', changes to initialValue are ignored
+  return <input value={value} onChange={e => setValue(e.target.value)} />;
+}
+```
+
+<Callout type="warn" title="Gotcha">
+State initialized from props only uses the initial prop value. If the prop changes, state won't update. Use a key to reset: `<EditableField key={id} initialValue={value} />`
+</Callout>
+
+---
+
+## State Updates
+
+### Batching
+
+React 18+ batches all state updates:
+
+```tsx
+function handleClick() {
+  setCount(c => c + 1);
+  setFlag(f => !f);
+  setName('Alice');
+  // Only one re-render!
+}
+```
+
+### Functional Updates
+
+Use when new state depends on old:
+
+```tsx
+// Risky with stale closures
+setCount(count + 1);
+
+// Safe: always uses latest state
+setCount(prevCount => prevCount + 1);
+```
+
+### Object/Array Updates
+
+Always create new references:
+
+```tsx
+// Objects
+setUser(prev => ({ ...prev, name: 'New Name' }));
+
+// Arrays - add
+setItems(prev => [...prev, newItem]);
+
+// Arrays - remove
+setItems(prev => prev.filter(item => item.id !== idToRemove));
+
+// Arrays - update
+setItems(prev => prev.map(item =>
+  item.id === idToUpdate ? { ...item, ...updates } : item
+));
+```
+
+---
+
+## Common Mistakes
+
+### 1. Mutating State
+
+```tsx
+// Wrong
+items.push(newItem);
+setItems(items);
+
+// Right
+setItems([...items, newItem]);
+```
+
+### 2. State for Everything
+
+```tsx
+// Don't use state for ref values
+const [inputRef] = useState(createRef()); // Wrong
+const inputRef = useRef(null); // Right
+
+// Don't store callbacks in state
+const [onClick] = useState(() => handleClick); // Wrong
+const onClick = useCallback(handleClick, []); // Right
+```
+
+### 3. Sync State with Props
+
+```tsx
+// Anti-pattern: trying to sync
+useEffect(() => {
+  setInternalValue(propValue);
+}, [propValue]);
+
+// Better: derive or use key to reset
+// Option 1: Derive
+const computedValue = transform(propValue);
+
+// Option 2: Reset with key
+<Component key={propValue} initialValue={propValue} />
+```

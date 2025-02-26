@@ -1,0 +1,284 @@
+---
+title: Testing Philosophy and Principles
+description: Core testing philosophy, the testing pyramid, and guiding principles for writing effective React tests
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+# Testing Philosophy and Principles
+
+Testing React applications requires a clear philosophy that prioritizes user behavior over implementation details. This guide covers the fundamental principles that lead to maintainable, valuable tests.
+
+## The Guiding Principle
+
+<Callout type="info">
+The more your tests resemble the way your software is used, the more confidence they can give you.
+</Callout>
+
+This principle from Kent C. Dodds shapes how we approach React testing. Tests should interact with components the same way users do—through visible text, accessible roles, and form interactions.
+
+## The Testing Trophy
+
+The Testing Trophy (an evolution of the Testing Pyramid) emphasizes integration tests for React applications:
+
+```
+      ╱╲
+     ╱  ╲        E2E (few)
+    ╱────╲
+   ╱      ╲      Integration (most)
+  ╱────────╲
+ ╱          ╲    Unit (some)
+╱────────────╲
+   Static        (TypeScript, ESLint)
+```
+
+| Level | Focus | Tools | Quantity |
+|-------|-------|-------|----------|
+| Static | Type errors, linting | TypeScript, ESLint | Always on |
+| Unit | Pure functions, utilities | Vitest | Some |
+| Integration | Component interactions | React Testing Library | Most |
+| E2E | Full user flows | Playwright | Few critical paths |
+
+## Core Testing Principles
+
+### 1. Test Behavior, Not Implementation
+
+```typescript
+// Bad: Testing implementation details
+it('sets isLoading state to true', () => {
+  const { result } = renderHook(() => useUser());
+  expect(result.current.isLoading).toBe(true);
+});
+
+// Good: Testing observable behavior
+it('shows loading indicator while fetching user', () => {
+  render(<UserProfile userId="123" />);
+  expect(screen.getByRole('progressbar')).toBeInTheDocument();
+});
+```
+
+### 2. Query by Accessibility
+
+Priority order for queries (most preferred first):
+
+| Query Type | When to Use | Example |
+|------------|-------------|---------|
+| `getByRole` | Default choice for most elements | `getByRole('button', { name: 'Submit' })` |
+| `getByLabelText` | Form fields | `getByLabelText('Email')` |
+| `getByPlaceholderText` | When label is absent | `getByPlaceholderText('Search...')` |
+| `getByText` | Non-interactive elements | `getByText('Welcome back')` |
+| `getByTestId` | Last resort only | `getByTestId('custom-dropdown')` |
+
+<Callout type="warn">
+Avoid `getByTestId` unless there is no accessible way to query the element. If you need test IDs, it often indicates an accessibility problem.
+</Callout>
+
+### 3. Arrange-Act-Assert Pattern
+
+```typescript
+it('submits the form with user data', async () => {
+  // Arrange
+  const onSubmit = vi.fn();
+  render(<ContactForm onSubmit={onSubmit} />);
+
+  // Act
+  await userEvent.type(screen.getByLabelText('Name'), 'John Doe');
+  await userEvent.type(screen.getByLabelText('Email'), 'john@example.com');
+  await userEvent.click(screen.getByRole('button', { name: 'Submit' }));
+
+  // Assert
+  expect(onSubmit).toHaveBeenCalledWith({
+    name: 'John Doe',
+    email: 'john@example.com',
+  });
+});
+```
+
+### 4. Avoid Testing Third-Party Code
+
+```typescript
+// Bad: Testing React Router's behavior
+it('navigates when link is clicked', () => {
+  // Testing that useNavigate works is React Router's job
+});
+
+// Good: Testing your component's integration
+it('calls navigate with correct path on success', async () => {
+  const navigate = vi.fn();
+  vi.mocked(useNavigate).mockReturnValue(navigate);
+
+  render(<CheckoutButton />);
+  await userEvent.click(screen.getByRole('button', { name: 'Checkout' }));
+
+  expect(navigate).toHaveBeenCalledWith('/checkout');
+});
+```
+
+## What to Test
+
+### Do Test
+
+| Category | Examples |
+|----------|----------|
+| User interactions | Clicks, typing, form submissions |
+| Conditional rendering | Loading states, error states, empty states |
+| Data transformations | Formatting, filtering, sorting in UI |
+| Accessibility | Keyboard navigation, ARIA states |
+| Edge cases | Empty inputs, boundary values, error handling |
+
+### Do Not Test
+
+| Category | Why |
+|----------|-----|
+| Implementation details | Subject to refactoring |
+| Third-party libraries | Already tested by maintainers |
+| Framework behavior | React handles this |
+| Exact CSS values | Brittle, use visual testing instead |
+| Console output | Not user-observable |
+
+## Test Organization
+
+```typescript
+describe('ProductCard', () => {
+  describe('rendering', () => {
+    it('displays product name and price', () => {});
+    it('shows sale badge when discounted', () => {});
+  });
+
+  describe('interactions', () => {
+    it('adds item to cart when Add button is clicked', () => {});
+    it('opens quick view modal on image click', () => {});
+  });
+
+  describe('error states', () => {
+    it('shows placeholder for missing image', () => {});
+    it('displays unavailable message when out of stock', () => {});
+  });
+});
+```
+
+## Pros and Cons of Different Testing Strategies
+
+### Unit Testing
+
+| Pros | Cons |
+|------|------|
+| Fast execution | May miss integration issues |
+| Easy to isolate failures | Can lead to testing implementation |
+| Simple to write | False confidence if overused |
+
+### Integration Testing
+
+| Pros | Cons |
+|------|------|
+| Tests real user flows | Slower than unit tests |
+| High confidence | More setup required |
+| Catches integration bugs | Harder to isolate failures |
+
+### E2E Testing
+
+| Pros | Cons |
+|------|------|
+| Tests entire stack | Slowest to run |
+| Highest confidence | Flaky if not careful |
+| Catches deployment issues | Expensive to maintain |
+
+## When to Use Each Test Type
+
+### Use Unit Tests When
+
+- Testing pure utility functions
+- Testing complex business logic
+- Testing data transformations
+- You need fast feedback
+
+### Use Integration Tests When
+
+- Testing component interactions
+- Testing form workflows
+- Testing state management flows
+- Testing API integration (with mocks)
+
+### Use E2E Tests When
+
+- Testing critical user paths (checkout, signup)
+- Testing authentication flows
+- Testing cross-page workflows
+- Before production releases
+
+## Anti-Patterns to Avoid
+
+### 1. Snapshot Overuse
+
+```typescript
+// Anti-pattern: Large snapshots that fail on any change
+it('renders correctly', () => {
+  const { container } = render(<ComplexForm />);
+  expect(container).toMatchSnapshot();
+});
+
+// Better: Test specific behavior
+it('renders all required form fields', () => {
+  render(<ComplexForm />);
+  expect(screen.getByLabelText('Email')).toBeInTheDocument();
+  expect(screen.getByLabelText('Password')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Submit' })).toBeInTheDocument();
+});
+```
+
+### 2. Testing Props Directly
+
+```typescript
+// Anti-pattern: Testing internal props
+it('passes disabled prop to button', () => {
+  render(<SubmitButton disabled />);
+  // Checking the prop was passed
+});
+
+// Better: Test observable behavior
+it('prevents submission when disabled', () => {
+  render(<SubmitButton disabled />);
+  expect(screen.getByRole('button')).toBeDisabled();
+});
+```
+
+### 3. Over-Mocking
+
+```typescript
+// Anti-pattern: Mocking everything
+vi.mock('./useUser');
+vi.mock('./api');
+vi.mock('./utils');
+vi.mock('./formatters');
+
+// Better: Mock only external boundaries
+vi.mock('./api'); // Only mock the network layer
+```
+
+<Callout type="info">
+A good test suite gives you confidence to refactor. If you fear changing code because tests might break, your tests are likely testing implementation details.
+</Callout>
+
+## Test Coverage Guidelines
+
+Coverage is a metric, not a goal. Aim for:
+
+| Metric | Target | Notes |
+|--------|--------|-------|
+| Line coverage | 70-80% | Higher for critical paths |
+| Branch coverage | 70-80% | Ensures conditionals are tested |
+| Function coverage | 80%+ | All public APIs should be tested |
+
+<Callout type="warn">
+100% coverage does not mean 100% confidence. A test that covers a line without asserting correct behavior provides false security.
+</Callout>
+
+## Summary
+
+1. Test behavior users can observe
+2. Query elements by accessible roles and labels
+3. Favor integration tests for most React code
+4. Reserve E2E for critical user journeys
+5. Mock only at system boundaries
+6. Avoid testing implementation details
+7. Use coverage as a guide, not a goal

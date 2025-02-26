@@ -1,0 +1,307 @@
+---
+title: Derived State
+description: Computing values from existing state instead of storing them
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## Computing vs Storing
+
+Derived state is any value that can be calculated from other state. **Don't store it—compute it.**
+
+```tsx
+// Bad: storing derived state
+const [items, setItems] = useState<Item[]>([]);
+const [totalPrice, setTotalPrice] = useState(0); // Derived from items!
+
+// Good: compute it
+const [items, setItems] = useState<Item[]>([]);
+const totalPrice = items.reduce((sum, item) => sum + item.price, 0);
+```
+
+| Approach | Pros | Cons |
+|----------|------|------|
+| **Stored** | None | Sync bugs, extra state, stale data |
+| **Computed** | Always correct, less code | May recalculate unnecessarily |
+| **Memoized** | Best of both, cached | Slightly more complex |
+
+<Callout type="warn" title="Core Principle">
+If a value can be computed from existing state or props, it should not be stored in state.
+</Callout>
+
+---
+
+## useMemo for Derived Values
+
+When derivation is expensive, memoize it:
+
+```tsx
+function ProductList({ products, filters }: Props) {
+  // Expensive computation - memoize
+  const filteredProducts = useMemo(() => {
+    return products
+      .filter(p => filters.category ? p.category === filters.category : true)
+      .filter(p => filters.minPrice ? p.price >= filters.minPrice : true)
+      .filter(p => filters.maxPrice ? p.price <= filters.maxPrice : true)
+      .sort((a, b) => {
+        if (filters.sortBy === 'price') return a.price - b.price;
+        if (filters.sortBy === 'name') return a.name.localeCompare(b.name);
+        return 0;
+      });
+  }, [products, filters]);
+
+  // Derived from derived - chain memoization
+  const totalValue = useMemo(() => {
+    return filteredProducts.reduce((sum, p) => sum + p.price, 0);
+  }, [filteredProducts]);
+
+  return (
+    <div>
+      <p>Total: ${totalValue}</p>
+      {filteredProducts.map(p => <ProductCard key={p.id} product={p} />)}
+    </div>
+  );
+}
+```
+
+### When to Memoize
+
+| Scenario | Memoize? |
+|----------|----------|
+| Simple property access | No |
+| Array `.map()` | Usually no |
+| Array `.filter().sort()` | Yes, if large array |
+| Complex calculations | Yes |
+| Creating new objects/arrays for child props | Yes, prevents re-renders |
+
+---
+
+## Anti-Pattern: Syncing State
+
+The most common derived state mistake:
+
+```tsx
+// Anti-pattern: syncing state with useEffect
+function SearchResults({ items }: { items: Item[] }) {
+  const [filteredItems, setFilteredItems] = useState<Item[]>([]);
+  const [searchTerm, setSearchTerm] = useState('');
+
+  // Bug-prone: sync state manually
+  useEffect(() => {
+    setFilteredItems(items.filter(item =>
+      item.name.toLowerCase().includes(searchTerm.toLowerCase())
+    ));
+  }, [items, searchTerm]);
+
+  return (/* ... */);
+}
+```
+
+Problems with syncing:
+1. Extra render cycle (state update triggers re-render)
+2. Race conditions possible
+3. Easy to forget dependencies
+4. Stale state between updates
+
+```tsx
+// Correct: compute directly
+function SearchResults({ items }: { items: Item[] }) {
+  const [searchTerm, setSearchTerm] = useState('');
+
+  const filteredItems = useMemo(() =>
+    items.filter(item =>
+      item.name.toLowerCase().includes(searchTerm.toLowerCase())
+    ),
+    [items, searchTerm]
+  );
+
+  return (/* ... */);
+}
+```
+
+<Callout type="error" title="Never Do This">
+Using useEffect to "sync" one state with another is almost always wrong. Compute derived values directly or use useMemo.
+</Callout>
+
+---
+
+## Selectors Pattern
+
+Extract derivation logic into reusable functions:
+
+```tsx
+// Define selectors
+type State = {
+  products: Product[];
+  cart: CartItem[];
+  filters: Filters;
+};
+
+const selectFilteredProducts = (state: State): Product[] => {
+  return state.products.filter(p =>
+    state.filters.category ? p.category === state.filters.category : true
+  );
+};
+
+const selectCartTotal = (state: State): number => {
+  return state.cart.reduce((sum, item) => {
+    const product = state.products.find(p => p.id === item.productId);
+    return sum + (product?.price ?? 0) * item.quantity;
+  }, 0);
+};
+
+const selectCartItemCount = (state: State): number => {
+  return state.cart.reduce((sum, item) => sum + item.quantity, 0);
+};
+
+// Compose selectors
+const selectCartSummary = (state: State) => ({
+  total: selectCartTotal(state),
+  itemCount: selectCartItemCount(state),
+});
+
+// Use in component
+function CartSummary() {
+  const { products, cart, filters } = useAppState();
+  const state = { products, cart, filters };
+
+  const summary = useMemo(
+    () => selectCartSummary(state),
+    [products, cart, filters]
+  );
+
+  return (
+    <div>
+      <span>{summary.itemCount} items</span>
+      <span>${summary.total}</span>
+    </div>
+  );
+}
+```
+
+### Benefits of Selectors
+
+| Benefit | Description |
+|---------|-------------|
+| **Testable** | Pure functions, easy to unit test |
+| **Reusable** | Use same logic across components |
+| **Composable** | Build complex selectors from simple ones |
+| **Encapsulated** | Derivation logic in one place |
+
+---
+
+## Complex Derivations
+
+For multi-step derivations, break into stages:
+
+```tsx
+function AnalyticsDashboard({ events }: { events: Event[] }) {
+  // Stage 1: Filter relevant events
+  const relevantEvents = useMemo(() =>
+    events.filter(e => e.timestamp > Date.now() - 7 * 24 * 60 * 60 * 1000),
+    [events]
+  );
+
+  // Stage 2: Group by type
+  const eventsByType = useMemo(() => {
+    const grouped = new Map<string, Event[]>();
+    for (const event of relevantEvents) {
+      const existing = grouped.get(event.type) ?? [];
+      grouped.set(event.type, [...existing, event]);
+    }
+    return grouped;
+  }, [relevantEvents]);
+
+  // Stage 3: Calculate statistics
+  const statistics = useMemo(() => {
+    const stats: Record<string, { count: number; avgDuration: number }> = {};
+
+    for (const [type, typeEvents] of eventsByType) {
+      const totalDuration = typeEvents.reduce((sum, e) => sum + e.duration, 0);
+      stats[type] = {
+        count: typeEvents.length,
+        avgDuration: totalDuration / typeEvents.length,
+      };
+    }
+
+    return stats;
+  }, [eventsByType]);
+
+  return <StatsDisplay statistics={statistics} />;
+}
+```
+
+### Derivation with Multiple Inputs
+
+```tsx
+function OrderSummary({ order, user, promotions }: Props) {
+  const orderCalculation = useMemo(() => {
+    const subtotal = order.items.reduce(
+      (sum, item) => sum + item.price * item.quantity,
+      0
+    );
+
+    const applicablePromo = promotions.find(p =>
+      p.minAmount <= subtotal && p.userTier <= user.tier
+    );
+
+    const discount = applicablePromo
+      ? subtotal * applicablePromo.percentage / 100
+      : 0;
+
+    const tax = (subtotal - discount) * 0.08;
+    const total = subtotal - discount + tax;
+
+    return { subtotal, discount, tax, total, appliedPromo: applicablePromo };
+  }, [order.items, user.tier, promotions]);
+
+  return (
+    <div>
+      <p>Subtotal: ${orderCalculation.subtotal}</p>
+      {orderCalculation.discount > 0 && (
+        <p>Discount: -${orderCalculation.discount}</p>
+      )}
+      <p>Tax: ${orderCalculation.tax}</p>
+      <p>Total: ${orderCalculation.total}</p>
+    </div>
+  );
+}
+```
+
+---
+
+## When Derived State Isn't Enough
+
+Sometimes you genuinely need separate state:
+
+| Scenario | Solution |
+|----------|----------|
+| User can override computed value | Two sources: computed default + user override |
+| Async computation | State for loading/result, trigger via effect |
+| Animation intermediate values | Separate state, controlled by animation |
+
+```tsx
+// Computed default with user override
+function PriceEditor({ basePrice, quantity }: Props) {
+  const computedTotal = basePrice * quantity;
+  const [userOverride, setUserOverride] = useState<number | null>(null);
+
+  const displayPrice = userOverride ?? computedTotal;
+  const isOverridden = userOverride !== null;
+
+  return (
+    <div>
+      <input
+        type="number"
+        value={displayPrice}
+        onChange={e => setUserOverride(Number(e.target.value))}
+      />
+      {isOverridden && (
+        <button onClick={() => setUserOverride(null)}>
+          Reset to ${computedTotal}
+        </button>
+      )}
+    </div>
+  );
+}
+```

@@ -1,0 +1,648 @@
+---
+title: Code Splitting
+description: Reducing bundle size with React.lazy, Suspense, and dynamic imports
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## Why Code Split?
+
+| Benefit | Description |
+|---------|-------------|
+| Faster initial load | Users download only what they need upfront |
+| Better caching | Changed code doesn't invalidate entire bundle |
+| Reduced memory | Browser doesn't parse unused code |
+| Improved TTI | Time to Interactive decreases |
+
+---
+
+## React.lazy
+
+Dynamically import components:
+
+```tsx
+import { lazy } from 'react';
+
+// Instead of static import
+// import { Dashboard } from './Dashboard';
+
+// Dynamic import - loaded when needed
+const Dashboard = lazy(() => import('./Dashboard'));
+```
+
+### How It Works
+
+1. `lazy()` returns a special component
+2. On first render, React calls the import function
+3. Import returns a Promise for the module
+4. React suspends rendering until Promise resolves
+5. Component renders with loaded module
+
+### Named Exports
+
+`lazy()` expects a default export. For named exports:
+
+```tsx
+// Dashboard.tsx exports: export function Dashboard() { ... }
+
+const Dashboard = lazy(() =>
+  import('./Dashboard').then(module => ({
+    default: module.Dashboard
+  }))
+);
+```
+
+### Multiple Named Exports
+
+```tsx
+// Charts.tsx
+export function LineChart() { /* ... */ }
+export function BarChart() { /* ... */ }
+export function PieChart() { /* ... */ }
+
+// Lazy load each
+const LineChart = lazy(() =>
+  import('./Charts').then(m => ({ default: m.LineChart }))
+);
+
+const BarChart = lazy(() =>
+  import('./Charts').then(m => ({ default: m.BarChart }))
+);
+```
+
+---
+
+## Suspense Boundaries
+
+Wrap lazy components with Suspense:
+
+```tsx
+import { Suspense, lazy } from 'react';
+
+const Dashboard = lazy(() => import('./Dashboard'));
+
+function App() {
+  return (
+    <Suspense fallback={<LoadingSpinner />}>
+      <Dashboard />
+    </Suspense>
+  );
+}
+```
+
+### Fallback Requirements
+
+```tsx
+// Fallback must be a React node
+<Suspense fallback={<LoadingSpinner />}>    {/* Component */}
+<Suspense fallback={<div>Loading...</div>}> {/* JSX */}
+<Suspense fallback="Loading...">            {/* String */}
+<Suspense fallback={null}>                  {/* Nothing */}
+```
+
+### Suspense Placement Strategies
+
+```tsx
+// Granular: Each component has own fallback
+function Dashboard() {
+  return (
+    <div className="dashboard">
+      <Suspense fallback={<ChartSkeleton />}>
+        <LazyChart />
+      </Suspense>
+      <Suspense fallback={<TableSkeleton />}>
+        <LazyDataTable />
+      </Suspense>
+      <Suspense fallback={<WidgetSkeleton />}>
+        <LazyWidgets />
+      </Suspense>
+    </div>
+  );
+}
+
+// Coarse: Single fallback for section
+function Dashboard() {
+  return (
+    <Suspense fallback={<DashboardSkeleton />}>
+      <div className="dashboard">
+        <LazyChart />
+        <LazyDataTable />
+        <LazyWidgets />
+      </div>
+    </Suspense>
+  );
+}
+```
+
+| Approach | Pros | Cons |
+|----------|------|------|
+| Granular | Components load independently, progressive reveal | More skeleton components to maintain |
+| Coarse | Simpler, consistent loading state | All-or-nothing loading |
+
+---
+
+## Route-Based Splitting
+
+The highest-impact split point for most applications:
+
+### Basic Route Splitting
+
+```tsx
+import { lazy, Suspense } from 'react';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
+
+const Home = lazy(() => import('./pages/Home'));
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const Settings = lazy(() => import('./pages/Settings'));
+const Profile = lazy(() => import('./pages/Profile'));
+
+function App() {
+  return (
+    <BrowserRouter>
+      <Suspense fallback={<PageLoader />}>
+        <Routes>
+          <Route path="/" element={<Home />} />
+          <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/settings" element={<Settings />} />
+          <Route path="/profile" element={<Profile />} />
+        </Routes>
+      </Suspense>
+    </BrowserRouter>
+  );
+}
+```
+
+### With Layout
+
+```tsx
+const DashboardLayout = lazy(() => import('./layouts/DashboardLayout'));
+const Analytics = lazy(() => import('./pages/Analytics'));
+const Reports = lazy(() => import('./pages/Reports'));
+
+function App() {
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<Home />} />
+        <Route
+          path="/dashboard"
+          element={
+            <Suspense fallback={<LayoutSkeleton />}>
+              <DashboardLayout />
+            </Suspense>
+          }
+        >
+          <Route
+            index
+            element={
+              <Suspense fallback={<PageSkeleton />}>
+                <Analytics />
+              </Suspense>
+            }
+          />
+          <Route
+            path="reports"
+            element={
+              <Suspense fallback={<PageSkeleton />}>
+                <Reports />
+              </Suspense>
+            }
+          />
+        </Route>
+      </Routes>
+    </BrowserRouter>
+  );
+}
+```
+
+---
+
+## Component-Based Splitting
+
+Split heavy components loaded conditionally:
+
+### Modal/Dialog Splitting
+
+```tsx
+const SettingsModal = lazy(() => import('./SettingsModal'));
+
+function App() {
+  const [showSettings, setShowSettings] = useState(false);
+
+  return (
+    <div>
+      <button onClick={() => setShowSettings(true)}>Settings</button>
+
+      {showSettings && (
+        <Suspense fallback={<ModalSkeleton />}>
+          <SettingsModal onClose={() => setShowSettings(false)} />
+        </Suspense>
+      )}
+    </div>
+  );
+}
+```
+
+### Feature-Based Splitting
+
+```tsx
+const MarkdownEditor = lazy(() => import('./MarkdownEditor'));
+const CodeEditor = lazy(() => import('./CodeEditor'));
+const RichTextEditor = lazy(() => import('./RichTextEditor'));
+
+interface EditorProps {
+  type: 'markdown' | 'code' | 'richtext';
+  content: string;
+  onChange: (content: string) => void;
+}
+
+function Editor({ type, content, onChange }: EditorProps) {
+  return (
+    <Suspense fallback={<EditorSkeleton />}>
+      {type === 'markdown' && (
+        <MarkdownEditor content={content} onChange={onChange} />
+      )}
+      {type === 'code' && (
+        <CodeEditor content={content} onChange={onChange} />
+      )}
+      {type === 'richtext' && (
+        <RichTextEditor content={content} onChange={onChange} />
+      )}
+    </Suspense>
+  );
+}
+```
+
+### Good Split Candidates
+
+| Component Type | Example | Why Split |
+|----------------|---------|-----------|
+| Modals/Dialogs | Settings, confirmations | Not needed until opened |
+| Heavy visualizations | Charts, graphs, maps | Large dependencies |
+| Admin features | Admin panel, audit logs | Most users never see |
+| Below-the-fold | Comments, related items | Not in initial viewport |
+| Conditional features | Export, print preview | Rarely used |
+
+### Poor Split Candidates
+
+| Component Type | Why NOT Split |
+|----------------|---------------|
+| Navigation | Always visible |
+| Small components | Overhead > savings |
+| Above-the-fold content | Delays initial render |
+| Frequently toggled UI | Loading flicker |
+
+---
+
+## Preloading Strategies
+
+Load components before they're needed:
+
+### Preload on Hover
+
+```tsx
+const Settings = lazy(() => import('./pages/Settings'));
+
+// Preload function
+const preloadSettings = () => import('./pages/Settings');
+
+function NavLink() {
+  return (
+    <Link
+      to="/settings"
+      onMouseEnter={preloadSettings}
+      onFocus={preloadSettings}
+    >
+      Settings
+    </Link>
+  );
+}
+```
+
+### Preload on Idle
+
+```tsx
+function App() {
+  useEffect(() => {
+    // Preload likely next pages when browser is idle
+    const idleCallback = requestIdleCallback(() => {
+      import('./pages/Dashboard');
+      import('./pages/Settings');
+    });
+
+    return () => cancelIdleCallback(idleCallback);
+  }, []);
+
+  return <Routes>{/* ... */}</Routes>;
+}
+```
+
+### Preload on Route Change
+
+```tsx
+function App() {
+  const location = useLocation();
+
+  useEffect(() => {
+    // Preload related routes
+    if (location.pathname === '/dashboard') {
+      import('./pages/Analytics');
+      import('./pages/Reports');
+    }
+  }, [location.pathname]);
+
+  return <Routes>{/* ... */}</Routes>;
+}
+```
+
+### Preload Component Factory
+
+```tsx
+function lazyWithPreload<T extends React.ComponentType<unknown>>(
+  importFn: () => Promise<{ default: T }>
+) {
+  const LazyComponent = lazy(importFn);
+
+  return Object.assign(LazyComponent, {
+    preload: importFn,
+  });
+}
+
+// Usage
+const Dashboard = lazyWithPreload(() => import('./pages/Dashboard'));
+
+// Preload when needed
+Dashboard.preload();
+
+// Render normally
+<Suspense fallback={<Loading />}>
+  <Dashboard />
+</Suspense>
+```
+
+| Strategy | When to Use |
+|----------|-------------|
+| On hover | Links, navigation items |
+| On idle | Likely next destinations |
+| On route change | Related routes |
+| On visibility | Below-fold content |
+
+---
+
+## Error Boundaries for Lazy
+
+Handle loading failures gracefully:
+
+### Basic Error Boundary
+
+```tsx
+import { Component, ReactNode } from 'react';
+
+interface Props {
+  children: ReactNode;
+  fallback: ReactNode;
+}
+
+interface State {
+  hasError: boolean;
+  error: Error | null;
+}
+
+class ErrorBoundary extends Component<Props, State> {
+  state: State = { hasError: false, error: null };
+
+  static getDerivedStateFromError(error: Error): State {
+    return { hasError: true, error };
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return this.props.fallback;
+    }
+    return this.props.children;
+  }
+}
+
+// Usage
+function App() {
+  return (
+    <ErrorBoundary fallback={<ErrorPage />}>
+      <Suspense fallback={<Loading />}>
+        <LazyComponent />
+      </Suspense>
+    </ErrorBoundary>
+  );
+}
+```
+
+### Error Boundary with Retry
+
+```tsx
+interface Props {
+  children: ReactNode;
+}
+
+interface State {
+  hasError: boolean;
+  error: Error | null;
+}
+
+class RetryErrorBoundary extends Component<Props, State> {
+  state: State = { hasError: false, error: null };
+
+  static getDerivedStateFromError(error: Error): State {
+    return { hasError: true, error };
+  }
+
+  handleRetry = () => {
+    this.setState({ hasError: false, error: null });
+  };
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="error-container">
+          <h2>Failed to load component</h2>
+          <p>{this.state.error?.message}</p>
+          <button onClick={this.handleRetry}>Try Again</button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+```
+
+### Lazy with Retry Logic
+
+```tsx
+function lazyWithRetry<T extends React.ComponentType<unknown>>(
+  importFn: () => Promise<{ default: T }>,
+  retries = 3,
+  delay = 1000
+): React.LazyExoticComponent<T> {
+  return lazy(async () => {
+    let lastError: Error | undefined;
+
+    for (let i = 0; i < retries; i++) {
+      try {
+        return await importFn();
+      } catch (error) {
+        lastError = error as Error;
+        // Wait before retry, with exponential backoff
+        await new Promise(resolve =>
+          setTimeout(resolve, delay * Math.pow(2, i))
+        );
+      }
+    }
+
+    throw lastError;
+  });
+}
+
+// Usage
+const Dashboard = lazyWithRetry(() => import('./pages/Dashboard'));
+```
+
+<Callout type="warn" title="Network Errors">
+Chunk loading can fail due to network issues or deployments. Always wrap lazy components in error boundaries.
+</Callout>
+
+---
+
+## Vite Configuration
+
+Configure chunk splitting in Vite:
+
+```tsx
+// vite.config.ts
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+
+export default defineConfig({
+  plugins: [react()],
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          // Separate vendor chunks
+          'react-vendor': ['react', 'react-dom'],
+          'router': ['react-router-dom'],
+        },
+      },
+    },
+  },
+});
+```
+
+### Analyzing Bundle
+
+```bash
+# Install analyzer
+npm install -D rollup-plugin-visualizer
+
+# Add to vite.config.ts
+import { visualizer } from 'rollup-plugin-visualizer';
+
+export default defineConfig({
+  plugins: [
+    react(),
+    visualizer({ open: true }),
+  ],
+});
+
+# Build and analyze
+npm run build
+```
+
+---
+
+## Common Mistakes
+
+### 1. Splitting Too Small
+
+```tsx
+// Don't lazy load tiny components
+const Button = lazy(() => import('./Button')); // Overkill
+
+// The import overhead exceeds the component size
+```
+
+### 2. Missing Suspense
+
+```tsx
+// Error: Lazy component without Suspense boundary
+function App() {
+  return <LazyComponent />; // Throws!
+}
+
+// Fix: Always wrap in Suspense
+function App() {
+  return (
+    <Suspense fallback={<Loading />}>
+      <LazyComponent />
+    </Suspense>
+  );
+}
+```
+
+### 3. Suspense Too High in Tree
+
+```tsx
+// Bad: App-level Suspense blanks entire UI
+function App() {
+  return (
+    <Suspense fallback={<FullPageLoader />}>
+      <Header />
+      <Sidebar />
+      <LazyMainContent /> {/* Loading this blanks everything */}
+    </Suspense>
+  );
+}
+
+// Better: Scoped Suspense
+function App() {
+  return (
+    <>
+      <Header />
+      <Sidebar />
+      <Suspense fallback={<ContentLoader />}>
+        <LazyMainContent />
+      </Suspense>
+    </>
+  );
+}
+```
+
+### 4. No Error Handling
+
+```tsx
+// Bad: No error handling for chunk load failures
+<Suspense fallback={<Loading />}>
+  <LazyComponent /> {/* What if this fails? */}
+</Suspense>
+
+// Good: Error boundary for failures
+<ErrorBoundary fallback={<ErrorFallback />}>
+  <Suspense fallback={<Loading />}>
+    <LazyComponent />
+  </Suspense>
+</ErrorBoundary>
+```
+
+---
+
+## Decision Guide
+
+| Situation | Recommendation |
+|-----------|---------------|
+| Route pages | Always split |
+| Large modals | Usually split |
+| Admin-only features | Always split |
+| Core UI components | Don't split |
+| Above-the-fold content | Don't split |
+| Frequently toggled UI | Consider carefully |
+
+<Callout type="info" title="Measure Impact">
+Use bundle analyzer to verify splitting reduces initial bundle. Sometimes consolidation is better than fragmentation.
+</Callout>

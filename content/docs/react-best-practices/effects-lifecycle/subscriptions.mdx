@@ -1,0 +1,606 @@
+---
+title: Subscriptions
+description: Patterns for subscribing to external data sources in React components
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## Event Subscriptions
+
+Subscribe to DOM and custom events with proper cleanup.
+
+```tsx
+import { useEffect, useState } from 'react';
+
+function OnlineStatus() {
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  return <div>Status: {isOnline ? 'Online' : 'Offline'}</div>;
+}
+```
+
+### Custom Event Subscription
+
+```tsx
+interface CustomEventMap {
+  'user:login': CustomEvent<{ userId: string }>;
+  'user:logout': CustomEvent<void>;
+}
+
+function useCustomEvent<K extends keyof CustomEventMap>(
+  eventName: K,
+  handler: (event: CustomEventMap[K]) => void
+) {
+  useEffect(() => {
+    const listener = handler as EventListener;
+    window.addEventListener(eventName, listener);
+    return () => window.removeEventListener(eventName, listener);
+  }, [eventName, handler]);
+}
+
+// Usage
+function UserNotifications() {
+  useCustomEvent('user:login', (e) => {
+    console.log('User logged in:', e.detail.userId);
+  });
+
+  return <div>Listening for user events...</div>;
+}
+```
+
+---
+
+## Store Subscriptions
+
+Subscribe to external state stores.
+
+### Basic Store Pattern
+
+```tsx
+// Simple store implementation
+type Listener = () => void;
+
+function createStore<T>(initialState: T) {
+  let state = initialState;
+  const listeners = new Set<Listener>();
+
+  return {
+    getState: () => state,
+    setState: (newState: T) => {
+      state = newState;
+      listeners.forEach(listener => listener());
+    },
+    subscribe: (listener: Listener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+  };
+}
+
+// Subscribe in component
+function useStore<T>(store: ReturnType<typeof createStore<T>>): T {
+  const [state, setState] = useState(store.getState);
+
+  useEffect(() => {
+    const unsubscribe = store.subscribe(() => {
+      setState(store.getState());
+    });
+    return unsubscribe;
+  }, [store]);
+
+  return state;
+}
+```
+
+### Subscribing to Part of Store
+
+```tsx
+interface AppState {
+  user: User | null;
+  theme: 'light' | 'dark';
+  notifications: Notification[];
+}
+
+function useStoreSelector<T, S>(
+  store: ReturnType<typeof createStore<T>>,
+  selector: (state: T) => S
+): S {
+  const [selected, setSelected] = useState(() => selector(store.getState()));
+
+  useEffect(() => {
+    const unsubscribe = store.subscribe(() => {
+      const newSelected = selector(store.getState());
+      setSelected(newSelected);
+    });
+    return unsubscribe;
+  }, [store, selector]);
+
+  return selected;
+}
+
+// Usage - only re-renders when theme changes
+function ThemeDisplay() {
+  const theme = useStoreSelector(appStore, state => state.theme);
+  return <div>Current theme: {theme}</div>;
+}
+```
+
+---
+
+## WebSocket Connections
+
+Manage WebSocket lifecycle in React.
+
+```tsx
+import { useEffect, useState, useCallback } from 'react';
+
+interface Message {
+  id: string;
+  content: string;
+  timestamp: number;
+}
+
+function useWebSocket(url: string) {
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [status, setStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting');
+  const [socket, setSocket] = useState<WebSocket | null>(null);
+
+  useEffect(() => {
+    const ws = new WebSocket(url);
+
+    ws.onopen = () => {
+      setStatus('connected');
+      setSocket(ws);
+    };
+
+    ws.onmessage = (event) => {
+      const message: Message = JSON.parse(event.data);
+      setMessages(prev => [...prev, message]);
+    };
+
+    ws.onclose = () => {
+      setStatus('disconnected');
+      setSocket(null);
+    };
+
+    ws.onerror = () => {
+      setStatus('disconnected');
+    };
+
+    return () => {
+      ws.close();
+    };
+  }, [url]);
+
+  const send = useCallback((content: string) => {
+    if (socket && status === 'connected') {
+      socket.send(JSON.stringify({ content }));
+    }
+  }, [socket, status]);
+
+  return { messages, status, send };
+}
+
+// Usage
+function Chat({ roomId }: { roomId: string }) {
+  const { messages, status, send } = useWebSocket(`wss://api.example.com/chat/${roomId}`);
+
+  if (status === 'connecting') return <div>Connecting...</div>;
+  if (status === 'disconnected') return <div>Disconnected</div>;
+
+  return (
+    <div>
+      {messages.map(msg => (
+        <div key={msg.id}>{msg.content}</div>
+      ))}
+      <input onKeyDown={e => e.key === 'Enter' && send(e.currentTarget.value)} />
+    </div>
+  );
+}
+```
+
+### WebSocket with Reconnection
+
+```tsx
+function useWebSocketWithReconnect(url: string, maxRetries = 3) {
+  const [socket, setSocket] = useState<WebSocket | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
+
+  useEffect(() => {
+    let ws: WebSocket;
+    let reconnectTimeout: number;
+
+    const connect = () => {
+      ws = new WebSocket(url);
+
+      ws.onopen = () => {
+        setSocket(ws);
+        setRetryCount(0);
+      };
+
+      ws.onclose = () => {
+        setSocket(null);
+        if (retryCount < maxRetries) {
+          const delay = Math.min(1000 * Math.pow(2, retryCount), 30000);
+          reconnectTimeout = window.setTimeout(() => {
+            setRetryCount(c => c + 1);
+            connect();
+          }, delay);
+        }
+      };
+    };
+
+    connect();
+
+    return () => {
+      clearTimeout(reconnectTimeout);
+      ws?.close();
+    };
+  }, [url, retryCount, maxRetries]);
+
+  return socket;
+}
+```
+
+---
+
+## useSyncExternalStore
+
+React 18's official API for subscribing to external stores.
+
+```tsx
+import { useSyncExternalStore } from 'react';
+
+// External store
+const todosStore = {
+  todos: [] as Todo[],
+  listeners: new Set<() => void>(),
+
+  addTodo(text: string) {
+    this.todos = [...this.todos, { id: Date.now(), text, done: false }];
+    this.listeners.forEach(l => l());
+  },
+
+  subscribe(listener: () => void) {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  },
+
+  getSnapshot() {
+    return this.todos;
+  },
+};
+
+// Usage with useSyncExternalStore
+function TodoList() {
+  const todos = useSyncExternalStore(
+    todosStore.subscribe.bind(todosStore),
+    todosStore.getSnapshot.bind(todosStore)
+  );
+
+  return (
+    <ul>
+      {todos.map(todo => (
+        <li key={todo.id}>{todo.text}</li>
+      ))}
+    </ul>
+  );
+}
+```
+
+### With Server Snapshot
+
+```tsx
+function useOnlineStatus() {
+  return useSyncExternalStore(
+    // Subscribe
+    (callback) => {
+      window.addEventListener('online', callback);
+      window.addEventListener('offline', callback);
+      return () => {
+        window.removeEventListener('online', callback);
+        window.removeEventListener('offline', callback);
+      };
+    },
+    // Client snapshot
+    () => navigator.onLine,
+    // Server snapshot
+    () => true
+  );
+}
+```
+
+### When to Use useSyncExternalStore
+
+| Use useSyncExternalStore | Use useEffect + useState |
+|--------------------------|--------------------------|
+| Subscribing to external store | One-time data fetch |
+| Browser APIs (localStorage, etc.) | Side effects without subscription |
+| Third-party state libraries | Component-local state |
+| Shared mutable state | Server state |
+
+<Callout type="info">
+useSyncExternalStore handles React 18 concurrent features correctly, avoiding tearing issues that can occur with manual subscriptions.
+</Callout>
+
+---
+
+## Pub/Sub Patterns
+
+Implement publish-subscribe within your React app.
+
+### Event Emitter Pattern
+
+```tsx
+type EventCallback<T = unknown> = (data: T) => void;
+
+class EventBus {
+  private events = new Map<string, Set<EventCallback>>();
+
+  on<T>(event: string, callback: EventCallback<T>) {
+    if (!this.events.has(event)) {
+      this.events.set(event, new Set());
+    }
+    this.events.get(event)!.add(callback as EventCallback);
+
+    return () => {
+      this.events.get(event)?.delete(callback as EventCallback);
+    };
+  }
+
+  emit<T>(event: string, data: T) {
+    this.events.get(event)?.forEach(callback => callback(data));
+  }
+}
+
+const eventBus = new EventBus();
+
+// Hook for subscribing
+function useEvent<T>(event: string, handler: (data: T) => void) {
+  useEffect(() => {
+    return eventBus.on<T>(event, handler);
+  }, [event, handler]);
+}
+
+// Usage
+function NotificationToast() {
+  const [message, setMessage] = useState<string | null>(null);
+
+  useEvent<string>('notification', setMessage);
+
+  if (!message) return null;
+  return <div className="toast">{message}</div>;
+}
+
+// Trigger from anywhere
+eventBus.emit('notification', 'Item saved!');
+```
+
+### Channel Pattern
+
+```tsx
+interface Channel<T> {
+  subscribe: (callback: (value: T) => void) => () => void;
+  publish: (value: T) => void;
+}
+
+function createChannel<T>(): Channel<T> {
+  const subscribers = new Set<(value: T) => void>();
+
+  return {
+    subscribe(callback) {
+      subscribers.add(callback);
+      return () => subscribers.delete(callback);
+    },
+    publish(value) {
+      subscribers.forEach(callback => callback(value));
+    },
+  };
+}
+
+// Typed channels
+const userChannel = createChannel<User>();
+const errorChannel = createChannel<Error>();
+
+// Subscribe hook
+function useChannel<T>(channel: Channel<T>, handler: (value: T) => void) {
+  useEffect(() => {
+    return channel.subscribe(handler);
+  }, [channel, handler]);
+}
+```
+
+---
+
+## Memory Leak Prevention
+
+Common patterns to avoid memory leaks.
+
+### Boolean Flag Pattern
+
+```tsx
+function UserData({ userId }: { userId: string }) {
+  const [user, setUser] = useState<User | null>(null);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    fetchUser(userId).then(data => {
+      if (isMounted) {
+        setUser(data);
+      }
+    });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [userId]);
+
+  return <div>{user?.name}</div>;
+}
+```
+
+### AbortController Pattern (Preferred)
+
+```tsx
+function UserData({ userId }: { userId: string }) {
+  const [user, setUser] = useState<User | null>(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    fetch(`/api/users/${userId}`, { signal: controller.signal })
+      .then(res => res.json())
+      .then(setUser)
+      .catch(err => {
+        if (err.name !== 'AbortError') {
+          console.error(err);
+        }
+      });
+
+    return () => controller.abort();
+  }, [userId]);
+
+  return <div>{user?.name}</div>;
+}
+```
+
+### Common Memory Leak Sources
+
+| Source | Prevention |
+|--------|------------|
+| Event listeners | Remove in cleanup |
+| Timers | Clear in cleanup |
+| Fetch requests | Abort in cleanup |
+| WebSocket | Close in cleanup |
+| Subscriptions | Unsubscribe in cleanup |
+| Closures holding refs | Use refs or abort flags |
+
+<Callout type="warn">
+Setting state after unmount causes memory leaks and React warnings. Always clean up async operations.
+</Callout>
+
+---
+
+## Testing Subscriptions
+
+Strategies for testing subscription-based components.
+
+### Mock Event Emitter
+
+```tsx
+// Test utility
+function createMockSubscription<T>() {
+  let callback: ((value: T) => void) | null = null;
+
+  return {
+    subscribe: (cb: (value: T) => void) => {
+      callback = cb;
+      return () => { callback = null; };
+    },
+    emit: (value: T) => callback?.(value),
+    getCallback: () => callback,
+  };
+}
+
+// Test
+describe('StockPrice', () => {
+  it('updates when price changes', () => {
+    const mockSubscription = createMockSubscription<number>();
+
+    // Inject mock
+    jest.spyOn(stockService, 'subscribe').mockImplementation(
+      (_, cb) => mockSubscription.subscribe(cb)
+    );
+
+    render(<StockPrice symbol="AAPL" />);
+
+    // Trigger update
+    act(() => {
+      mockSubscription.emit(150.25);
+    });
+
+    expect(screen.getByText('AAPL: $150.25')).toBeInTheDocument();
+  });
+});
+```
+
+### Test Cleanup
+
+```tsx
+describe('WindowSize', () => {
+  it('removes listener on unmount', () => {
+    const addSpy = jest.spyOn(window, 'addEventListener');
+    const removeSpy = jest.spyOn(window, 'removeEventListener');
+
+    const { unmount } = render(<WindowSize />);
+
+    expect(addSpy).toHaveBeenCalledWith('resize', expect.any(Function));
+
+    unmount();
+
+    expect(removeSpy).toHaveBeenCalledWith('resize', expect.any(Function));
+  });
+});
+```
+
+### Test WebSocket
+
+```tsx
+// Mock WebSocket
+class MockWebSocket {
+  onopen: (() => void) | null = null;
+  onmessage: ((e: { data: string }) => void) | null = null;
+  onclose: (() => void) | null = null;
+
+  close = jest.fn();
+  send = jest.fn();
+
+  simulateOpen() {
+    this.onopen?.();
+  }
+
+  simulateMessage(data: object) {
+    this.onmessage?.({ data: JSON.stringify(data) });
+  }
+}
+
+describe('Chat', () => {
+  let mockWs: MockWebSocket;
+
+  beforeEach(() => {
+    mockWs = new MockWebSocket();
+    jest.spyOn(global, 'WebSocket').mockImplementation(() => mockWs as unknown as WebSocket);
+  });
+
+  it('displays messages', async () => {
+    render(<Chat roomId="test" />);
+
+    act(() => mockWs.simulateOpen());
+    act(() => mockWs.simulateMessage({ id: '1', content: 'Hello' }));
+
+    expect(screen.getByText('Hello')).toBeInTheDocument();
+  });
+
+  it('closes connection on unmount', () => {
+    const { unmount } = render(<Chat roomId="test" />);
+
+    unmount();
+
+    expect(mockWs.close).toHaveBeenCalled();
+  });
+});
+```

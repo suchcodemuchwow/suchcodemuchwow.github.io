@@ -1,0 +1,615 @@
+---
+title: Uncontrolled Inputs
+description: Working with uncontrolled form inputs using refs in React
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## What Are Uncontrolled Inputs?
+
+Uncontrolled inputs store their value in the DOM, not in React state. Access values via refs when needed, typically on form submission.
+
+```tsx
+function UncontrolledForm() {
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    console.log('Value:', inputRef.current?.value);
+  };
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <input ref={inputRef} type="text" defaultValue="" />
+      <button type="submit">Submit</button>
+    </form>
+  );
+}
+```
+
+<Callout type="info" title="Key Difference">
+Use `defaultValue` instead of `value` for uncontrolled inputs. The `value` prop makes an input controlled.
+</Callout>
+
+---
+
+## Basic Patterns
+
+### Text Input with Ref
+
+```tsx
+function TextInputForm() {
+  const nameRef = useRef<HTMLInputElement>(null);
+  const emailRef = useRef<HTMLInputElement>(null);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const data = {
+      name: nameRef.current?.value ?? '',
+      email: emailRef.current?.value ?? '',
+    };
+    console.log(data);
+  };
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <input ref={nameRef} type="text" defaultValue="" />
+      <input ref={emailRef} type="email" defaultValue="" />
+      <button type="submit">Submit</button>
+    </form>
+  );
+}
+```
+
+### Using FormData API
+
+```tsx
+function FormDataExample() {
+  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const formData = new FormData(e.currentTarget);
+    const data = {
+      name: formData.get('name') as string,
+      email: formData.get('email') as string,
+      message: formData.get('message') as string,
+    };
+    console.log(data);
+  };
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <input name="name" type="text" />
+      <input name="email" type="email" />
+      <textarea name="message" />
+      <button type="submit">Submit</button>
+    </form>
+  );
+}
+```
+
+### Object.fromEntries Pattern
+
+```tsx
+function SimpleForm() {
+  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const formData = new FormData(e.currentTarget);
+    const data = Object.fromEntries(formData);
+    console.log(data);
+  };
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <input name="firstName" defaultValue="" />
+      <input name="lastName" defaultValue="" />
+      <select name="country" defaultValue="us">
+        <option value="us">United States</option>
+        <option value="uk">United Kingdom</option>
+        <option value="ca">Canada</option>
+      </select>
+      <button type="submit">Submit</button>
+    </form>
+  );
+}
+```
+
+---
+
+## Ref Typing for Form Elements
+
+```tsx
+function FormRefs() {
+  // Text inputs
+  const textRef = useRef<HTMLInputElement>(null);
+  const emailRef = useRef<HTMLInputElement>(null);
+  const numberRef = useRef<HTMLInputElement>(null);
+
+  // Textarea
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Select
+  const selectRef = useRef<HTMLSelectElement>(null);
+
+  // Form itself
+  const formRef = useRef<HTMLFormElement>(null);
+
+  const resetForm = () => {
+    formRef.current?.reset();
+  };
+
+  return (
+    <form ref={formRef}>
+      <input ref={textRef} type="text" />
+      <input ref={emailRef} type="email" />
+      <input ref={numberRef} type="number" />
+      <textarea ref={textareaRef} />
+      <select ref={selectRef}>
+        <option value="a">A</option>
+        <option value="b">B</option>
+      </select>
+      <button type="button" onClick={resetForm}>Reset</button>
+    </form>
+  );
+}
+```
+
+---
+
+## Checkbox and Radio
+
+### Uncontrolled Checkbox
+
+```tsx
+function CheckboxForm() {
+  const termsRef = useRef<HTMLInputElement>(null);
+  const newsletterRef = useRef<HTMLInputElement>(null);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    console.log({
+      acceptedTerms: termsRef.current?.checked ?? false,
+      newsletter: newsletterRef.current?.checked ?? false,
+    });
+  };
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <label>
+        <input ref={termsRef} type="checkbox" defaultChecked={false} />
+        Accept Terms
+      </label>
+      <label>
+        <input ref={newsletterRef} type="checkbox" defaultChecked={true} />
+        Subscribe to Newsletter
+      </label>
+      <button type="submit">Submit</button>
+    </form>
+  );
+}
+```
+
+### Uncontrolled Radio Group
+
+```tsx
+function RadioForm() {
+  const formRef = useRef<HTMLFormElement>(null);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const formData = new FormData(formRef.current!);
+    const plan = formData.get('plan') as string;
+    console.log('Selected plan:', plan);
+  };
+
+  return (
+    <form ref={formRef} onSubmit={handleSubmit}>
+      <fieldset>
+        <legend>Select a plan</legend>
+        <label>
+          <input type="radio" name="plan" value="free" defaultChecked />
+          Free
+        </label>
+        <label>
+          <input type="radio" name="plan" value="pro" />
+          Pro
+        </label>
+        <label>
+          <input type="radio" name="plan" value="enterprise" />
+          Enterprise
+        </label>
+      </fieldset>
+      <button type="submit">Submit</button>
+    </form>
+  );
+}
+```
+
+---
+
+## File Inputs
+
+File inputs are always uncontrolled. React cannot set their value programmatically.
+
+```tsx
+function FileUploadForm() {
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const files = fileRef.current?.files;
+    if (files && files.length > 0) {
+      const file = files[0];
+      console.log('File:', file.name, file.size, file.type);
+    }
+  };
+
+  const clearFile = () => {
+    if (fileRef.current) {
+      fileRef.current.value = '';
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <input ref={fileRef} type="file" accept="image/*" />
+      <button type="button" onClick={clearFile}>Clear</button>
+      <button type="submit">Upload</button>
+    </form>
+  );
+}
+```
+
+### Multiple Files
+
+```tsx
+function MultiFileUpload() {
+  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const formData = new FormData(e.currentTarget);
+    const files = formData.getAll('files') as File[];
+    files.forEach((file) => {
+      console.log(file.name, file.size);
+    });
+  };
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <input name="files" type="file" multiple />
+      <button type="submit">Upload All</button>
+    </form>
+  );
+}
+```
+
+### Drag and Drop with File Input
+
+```tsx
+function DragDropUpload() {
+  const [isDragging, setIsDragging] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const files = e.dataTransfer.files;
+    if (files.length > 0) {
+      // Programmatically set files isn't possible, handle directly
+      handleFiles(files);
+    }
+  };
+
+  const handleFiles = (files: FileList) => {
+    Array.from(files).forEach((file) => {
+      console.log('Processing:', file.name);
+    });
+  };
+
+  return (
+    <div
+      onDragOver={(e) => {
+        e.preventDefault();
+        setIsDragging(true);
+      }}
+      onDragLeave={() => setIsDragging(false)}
+      onDrop={handleDrop}
+      style={{
+        border: isDragging ? '2px dashed blue' : '2px dashed gray',
+        padding: '2rem',
+      }}
+    >
+      <input
+        ref={fileRef}
+        type="file"
+        onChange={(e) => e.target.files && handleFiles(e.target.files)}
+        style={{ display: 'none' }}
+      />
+      <button type="button" onClick={() => fileRef.current?.click()}>
+        Select Files
+      </button>
+      <p>Or drag and drop files here</p>
+    </div>
+  );
+}
+```
+
+---
+
+## Form Reset Patterns
+
+### Using form.reset()
+
+```tsx
+function ResettableForm() {
+  const formRef = useRef<HTMLFormElement>(null);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const formData = new FormData(formRef.current!);
+    console.log(Object.fromEntries(formData));
+    formRef.current?.reset(); // Reset all fields to default values
+  };
+
+  return (
+    <form ref={formRef} onSubmit={handleSubmit}>
+      <input name="name" defaultValue="" />
+      <input name="email" defaultValue="" />
+      <button type="submit">Submit</button>
+      <button type="reset">Reset</button>
+    </form>
+  );
+}
+```
+
+### Resetting to Specific Values
+
+```tsx
+function FormWithDefaults() {
+  const nameRef = useRef<HTMLInputElement>(null);
+  const emailRef = useRef<HTMLInputElement>(null);
+
+  const defaults = {
+    name: 'John Doe',
+    email: 'john@example.com',
+  };
+
+  const resetToDefaults = () => {
+    if (nameRef.current) nameRef.current.value = defaults.name;
+    if (emailRef.current) emailRef.current.value = defaults.email;
+  };
+
+  return (
+    <form>
+      <input ref={nameRef} defaultValue={defaults.name} />
+      <input ref={emailRef} defaultValue={defaults.email} />
+      <button type="button" onClick={resetToDefaults}>
+        Reset to Defaults
+      </button>
+    </form>
+  );
+}
+```
+
+---
+
+## Hybrid Pattern: Uncontrolled with Key Reset
+
+```tsx
+function FormWithKeyReset() {
+  const [formKey, setFormKey] = useState(0);
+
+  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const formData = new FormData(e.currentTarget);
+    console.log(Object.fromEntries(formData));
+    setFormKey((k) => k + 1); // Remount form with fresh state
+  };
+
+  return (
+    <form key={formKey} onSubmit={handleSubmit}>
+      <input name="search" defaultValue="" />
+      <button type="submit">Search</button>
+    </form>
+  );
+}
+```
+
+<Callout type="info" title="Key Reset">
+Changing the `key` prop remounts the component, resetting all uncontrolled inputs to their `defaultValue`.
+</Callout>
+
+---
+
+## Accessing Values Imperatively
+
+### Focus and Selection
+
+```tsx
+function TextSelection() {
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const selectAll = () => {
+    inputRef.current?.select();
+  };
+
+  const selectRange = (start: number, end: number) => {
+    inputRef.current?.setSelectionRange(start, end);
+    inputRef.current?.focus();
+  };
+
+  return (
+    <div>
+      <input ref={inputRef} defaultValue="Hello World" />
+      <button onClick={selectAll}>Select All</button>
+      <button onClick={() => selectRange(0, 5)}>Select "Hello"</button>
+    </div>
+  );
+}
+```
+
+### Setting Value Programmatically
+
+```tsx
+function AutofillExample() {
+  const addressRef = useRef<HTMLInputElement>(null);
+  const cityRef = useRef<HTMLInputElement>(null);
+  const zipRef = useRef<HTMLInputElement>(null);
+
+  const autofillFromGeolocation = async () => {
+    // Simulated geolocation lookup
+    const location = { address: '123 Main St', city: 'New York', zip: '10001' };
+
+    if (addressRef.current) addressRef.current.value = location.address;
+    if (cityRef.current) cityRef.current.value = location.city;
+    if (zipRef.current) zipRef.current.value = location.zip;
+  };
+
+  return (
+    <form>
+      <input ref={addressRef} name="address" placeholder="Address" />
+      <input ref={cityRef} name="city" placeholder="City" />
+      <input ref={zipRef} name="zip" placeholder="ZIP" />
+      <button type="button" onClick={autofillFromGeolocation}>
+        Use My Location
+      </button>
+    </form>
+  );
+}
+```
+
+---
+
+## When to Use Uncontrolled Inputs
+
+### Use Uncontrolled When
+
+- Simple forms with submit-only validation
+- File uploads (required)
+- Performance-critical forms with many fields
+- Integrating with non-React libraries
+- Forms where real-time validation isn't needed
+- Quick prototypes or simple use cases
+
+### Code Comparison
+
+```tsx
+// Uncontrolled: Less code for simple cases
+function SimpleUncontrolled() {
+  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const data = new FormData(e.currentTarget);
+    submitToServer(Object.fromEntries(data));
+  };
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <input name="email" type="email" />
+      <button type="submit">Subscribe</button>
+    </form>
+  );
+}
+
+// Controlled: More code, but more capabilities
+function SimpleControlled() {
+  const [email, setEmail] = useState('');
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    submitToServer({ email });
+  };
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <input
+        type="email"
+        value={email}
+        onChange={(e) => setEmail(e.target.value)}
+      />
+      <button type="submit">Subscribe</button>
+    </form>
+  );
+}
+```
+
+---
+
+## When NOT to Use Uncontrolled Inputs
+
+### Avoid Uncontrolled When
+
+- Real-time validation is needed
+- Input value affects other UI
+- Dynamic form fields
+- Complex validation logic
+- Value formatting/transformation
+- Conditional field visibility
+
+```tsx
+// This is HARD with uncontrolled inputs
+function DependentFields() {
+  const [country, setCountry] = useState('us');
+  const states = useStatesForCountry(country); // Depends on country
+
+  return (
+    <form>
+      {/* Must be controlled to trigger state list update */}
+      <select value={country} onChange={(e) => setCountry(e.target.value)}>
+        <option value="us">United States</option>
+        <option value="ca">Canada</option>
+      </select>
+      <select>
+        {states.map((s) => (
+          <option key={s.code} value={s.code}>{s.name}</option>
+        ))}
+      </select>
+    </form>
+  );
+}
+```
+
+---
+
+## Pros and Cons
+
+| Pros | Cons |
+|------|------|
+| Less boilerplate code | No real-time validation |
+| Better performance (fewer re-renders) | Can't dynamically update UI |
+| Simpler for basic forms | Harder to test |
+| Native browser behaviors preserved | Limited transformation options |
+| Easier third-party integration | Manual DOM manipulation |
+| File inputs require it | No single source of truth |
+
+---
+
+## Controlled vs Uncontrolled Summary
+
+| Feature | Controlled | Uncontrolled |
+|---------|-----------|--------------|
+| Value stored in | React state | DOM |
+| Set initial value | `value={state}` | `defaultValue` |
+| Read value | From state | Via ref |
+| Validation timing | On change | On submit |
+| Re-renders | Every keystroke | None |
+| Best for | Dynamic forms | Simple forms |
+
+<Callout type="warn" title="Never Mix">
+Don't switch between controlled and uncontrolled. Pick one pattern per input and stick with it.
+</Callout>
+
+```tsx
+// BAD: Mixing patterns
+<input
+  value={value}         // Controlled
+  defaultValue="test"   // Uncontrolled - will be ignored
+/>
+
+// BAD: Conditional control
+<input
+  value={value || undefined}  // Switches between controlled/uncontrolled
+/>
+
+// GOOD: Pick one
+<input value={value} onChange={handleChange} />
+// OR
+<input defaultValue="test" ref={inputRef} />
+```

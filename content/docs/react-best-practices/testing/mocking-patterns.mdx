@@ -1,0 +1,800 @@
+---
+title: Mocking Patterns for Tests
+description: Comprehensive guide to mocking in React tests including modules, hooks, API calls, timers, and browser APIs using Vitest and MSW
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+# Mocking Patterns for Tests
+
+Mocking allows tests to control external dependencies, isolate code under test, and simulate various conditions. This guide covers mocking patterns for React applications using Vitest and MSW.
+
+## Mocking Philosophy
+
+<Callout type="info">
+Mock at the boundaries, not in the middle. Network requests, timers, and browser APIs are good mock targets. Internal functions and components should rarely be mocked.
+</Callout>
+
+| Mock Level | When to Use | When NOT to Use |
+|------------|-------------|-----------------|
+| Network | Always for external APIs | When testing the API layer itself |
+| Modules | Third-party libraries with side effects | Internal project modules |
+| Timers | setTimeout, setInterval, Date | Simple synchronous code |
+| Browser APIs | localStorage, geolocation | When testing polyfills |
+
+## Function Mocks
+
+### Basic Function Mocking
+
+```typescript
+import { vi, describe, it, expect } from 'vitest';
+
+describe('Function mocks', () => {
+  it('creates a mock function', () => {
+    const mockFn = vi.fn();
+
+    mockFn('arg1', 'arg2');
+
+    expect(mockFn).toHaveBeenCalled();
+    expect(mockFn).toHaveBeenCalledWith('arg1', 'arg2');
+    expect(mockFn).toHaveBeenCalledTimes(1);
+  });
+
+  it('mock with return value', () => {
+    const mockFn = vi.fn().mockReturnValue(42);
+
+    expect(mockFn()).toBe(42);
+  });
+
+  it('mock with implementation', () => {
+    const mockFn = vi.fn((x: number) => x * 2);
+
+    expect(mockFn(5)).toBe(10);
+  });
+
+  it('mock with different returns', () => {
+    const mockFn = vi.fn()
+      .mockReturnValueOnce('first')
+      .mockReturnValueOnce('second')
+      .mockReturnValue('default');
+
+    expect(mockFn()).toBe('first');
+    expect(mockFn()).toBe('second');
+    expect(mockFn()).toBe('default');
+    expect(mockFn()).toBe('default');
+  });
+});
+```
+
+### Async Function Mocks
+
+```typescript
+describe('Async mocks', () => {
+  it('mock resolved value', async () => {
+    const mockFn = vi.fn().mockResolvedValue({ data: 'success' });
+
+    const result = await mockFn();
+    expect(result).toEqual({ data: 'success' });
+  });
+
+  it('mock rejected value', async () => {
+    const mockFn = vi.fn().mockRejectedValue(new Error('Failed'));
+
+    await expect(mockFn()).rejects.toThrow('Failed');
+  });
+
+  it('mock sequential async returns', async () => {
+    const mockFn = vi.fn()
+      .mockResolvedValueOnce({ page: 1 })
+      .mockResolvedValueOnce({ page: 2 });
+
+    expect(await mockFn()).toEqual({ page: 1 });
+    expect(await mockFn()).toEqual({ page: 2 });
+  });
+});
+```
+
+### Spying on Existing Functions
+
+```typescript
+import * as utils from './utils';
+
+describe('Spies', () => {
+  it('spies on module function', () => {
+    const spy = vi.spyOn(utils, 'formatDate');
+
+    utils.formatDate(new Date());
+
+    expect(spy).toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  it('spies and replaces implementation', () => {
+    const spy = vi.spyOn(utils, 'fetchData').mockResolvedValue({ mocked: true });
+
+    // Original function is replaced
+    const result = await utils.fetchData();
+    expect(result).toEqual({ mocked: true });
+
+    spy.mockRestore();
+  });
+
+  it('spies on object method', () => {
+    const obj = {
+      method: (x: number) => x * 2,
+    };
+
+    const spy = vi.spyOn(obj, 'method');
+
+    obj.method(5);
+
+    expect(spy).toHaveBeenCalledWith(5);
+  });
+});
+```
+
+## Module Mocking
+
+### Mocking Entire Modules
+
+```typescript
+// __mocks__/axios.ts (manual mock)
+export default {
+  get: vi.fn(),
+  post: vi.fn(),
+  put: vi.fn(),
+  delete: vi.fn(),
+};
+
+// test file
+vi.mock('axios');
+
+import axios from 'axios';
+
+describe('API calls', () => {
+  it('mocks axios get', async () => {
+    vi.mocked(axios.get).mockResolvedValue({ data: { id: 1 } });
+
+    const response = await axios.get('/api/user');
+    expect(response.data).toEqual({ id: 1 });
+  });
+});
+```
+
+### Partial Module Mocking
+
+```typescript
+// Keep original exports, mock specific ones
+vi.mock('./utils', async () => {
+  const actual = await vi.importActual('./utils');
+  return {
+    ...actual,
+    fetchData: vi.fn(), // Only mock this function
+  };
+});
+```
+
+### Mocking ES Modules with Factory
+
+```typescript
+vi.mock('./api', () => ({
+  getUser: vi.fn(),
+  createUser: vi.fn(),
+  updateUser: vi.fn(),
+}));
+
+import { getUser, createUser } from './api';
+
+beforeEach(() => {
+  vi.mocked(getUser).mockResolvedValue({ id: '1', name: 'John' });
+  vi.mocked(createUser).mockResolvedValue({ id: '2', name: 'Jane' });
+});
+```
+
+### Mocking Default and Named Exports
+
+```typescript
+// Module with both export types
+// logger.ts
+export const logError = (msg: string) => console.error(msg);
+export default class Logger {
+  log(msg: string) { console.log(msg); }
+}
+
+// Test file
+vi.mock('./logger', () => ({
+  default: vi.fn().mockImplementation(() => ({
+    log: vi.fn(),
+  })),
+  logError: vi.fn(),
+}));
+```
+
+## Mocking React Hooks
+
+### Mocking Custom Hooks
+
+```typescript
+// useAuth.ts
+export function useAuth() {
+  // ... implementation
+  return { user, login, logout, isLoading };
+}
+
+// Component.test.tsx
+vi.mock('./useAuth', () => ({
+  useAuth: vi.fn(),
+}));
+
+import { useAuth } from './useAuth';
+import { render, screen } from '@testing-library/react';
+import { Dashboard } from './Dashboard';
+
+describe('Dashboard', () => {
+  it('shows user name when authenticated', () => {
+    vi.mocked(useAuth).mockReturnValue({
+      user: { name: 'John Doe' },
+      login: vi.fn(),
+      logout: vi.fn(),
+      isLoading: false,
+    });
+
+    render(<Dashboard />);
+    expect(screen.getByText('Welcome, John Doe')).toBeInTheDocument();
+  });
+
+  it('shows login button when not authenticated', () => {
+    vi.mocked(useAuth).mockReturnValue({
+      user: null,
+      login: vi.fn(),
+      logout: vi.fn(),
+      isLoading: false,
+    });
+
+    render(<Dashboard />);
+    expect(screen.getByRole('button', { name: 'Sign in' })).toBeInTheDocument();
+  });
+});
+```
+
+### Mocking React Router Hooks
+
+```typescript
+vi.mock('react-router-dom', async () => {
+  const actual = await vi.importActual('react-router-dom');
+  return {
+    ...actual,
+    useNavigate: vi.fn(),
+    useParams: vi.fn(),
+    useSearchParams: vi.fn(),
+  };
+});
+
+import { useNavigate, useParams } from 'react-router-dom';
+
+describe('ProductPage', () => {
+  it('navigates on action', async () => {
+    const navigate = vi.fn();
+    vi.mocked(useNavigate).mockReturnValue(navigate);
+    vi.mocked(useParams).mockReturnValue({ id: '123' });
+
+    render(<ProductPage />);
+    await userEvent.click(screen.getByRole('button', { name: 'Back' }));
+
+    expect(navigate).toHaveBeenCalledWith('/products');
+  });
+});
+```
+
+## Network Mocking with MSW
+
+### Setup
+
+```bash
+npm install -D msw
+```
+
+```typescript
+// src/test/mocks/handlers.ts
+import { http, HttpResponse, delay } from 'msw';
+
+export const handlers = [
+  // GET request
+  http.get('/api/users/:id', async ({ params }) => {
+    const { id } = params;
+    return HttpResponse.json({
+      id,
+      name: 'John Doe',
+      email: 'john@example.com',
+    });
+  }),
+
+  // POST request
+  http.post('/api/users', async ({ request }) => {
+    const body = await request.json();
+    return HttpResponse.json(
+      { id: 'new-id', ...body },
+      { status: 201 }
+    );
+  }),
+
+  // With delay (for loading states)
+  http.get('/api/slow', async () => {
+    await delay(2000);
+    return HttpResponse.json({ data: 'loaded' });
+  }),
+
+  // Error response
+  http.get('/api/error', () => {
+    return HttpResponse.json(
+      { message: 'Not found' },
+      { status: 404 }
+    );
+  }),
+];
+
+// src/test/mocks/server.ts
+import { setupServer } from 'msw/node';
+import { handlers } from './handlers';
+
+export const server = setupServer(...handlers);
+
+// src/test/setup.ts
+import { server } from './mocks/server';
+
+beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
+afterEach(() => server.resetHandlers());
+afterAll(() => server.close());
+```
+
+### Overriding Handlers Per Test
+
+```typescript
+import { http, HttpResponse } from 'msw';
+import { server } from '../test/mocks/server';
+
+describe('UserProfile', () => {
+  it('handles API error', async () => {
+    // Override handler for this test only
+    server.use(
+      http.get('/api/users/:id', () => {
+        return HttpResponse.json(
+          { message: 'User not found' },
+          { status: 404 }
+        );
+      })
+    );
+
+    render(<UserProfile userId="123" />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toHaveTextContent('User not found');
+    });
+  });
+
+  it('handles network failure', async () => {
+    server.use(
+      http.get('/api/users/:id', () => {
+        return HttpResponse.error();
+      })
+    );
+
+    render(<UserProfile userId="123" />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/network error/i)).toBeInTheDocument();
+    });
+  });
+});
+```
+
+### Capturing Request Data
+
+```typescript
+describe('CreateUser', () => {
+  it('sends correct data to API', async () => {
+    let capturedBody: unknown;
+
+    server.use(
+      http.post('/api/users', async ({ request }) => {
+        capturedBody = await request.json();
+        return HttpResponse.json({ id: '1' }, { status: 201 });
+      })
+    );
+
+    render(<CreateUserForm />);
+
+    await userEvent.type(screen.getByLabelText('Name'), 'Jane Doe');
+    await userEvent.type(screen.getByLabelText('Email'), 'jane@example.com');
+    await userEvent.click(screen.getByRole('button', { name: 'Create' }));
+
+    await waitFor(() => {
+      expect(capturedBody).toEqual({
+        name: 'Jane Doe',
+        email: 'jane@example.com',
+      });
+    });
+  });
+});
+```
+
+## Timer Mocking
+
+### Fake Timers
+
+```typescript
+describe('Timer mocks', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('handles setTimeout', () => {
+    const callback = vi.fn();
+
+    setTimeout(callback, 1000);
+
+    expect(callback).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(1000);
+
+    expect(callback).toHaveBeenCalledTimes(1);
+  });
+
+  it('handles setInterval', () => {
+    const callback = vi.fn();
+
+    setInterval(callback, 1000);
+
+    vi.advanceTimersByTime(3000);
+
+    expect(callback).toHaveBeenCalledTimes(3);
+  });
+
+  it('runs all pending timers', () => {
+    const callback1 = vi.fn();
+    const callback2 = vi.fn();
+
+    setTimeout(callback1, 1000);
+    setTimeout(callback2, 5000);
+
+    vi.runAllTimers();
+
+    expect(callback1).toHaveBeenCalled();
+    expect(callback2).toHaveBeenCalled();
+  });
+});
+```
+
+### Testing Debounced Functions
+
+```typescript
+// SearchInput.tsx
+export function SearchInput({ onSearch }: { onSearch: (term: string) => void }) {
+  const [value, setValue] = useState('');
+
+  const debouncedSearch = useMemo(
+    () => debounce((term: string) => onSearch(term), 300),
+    [onSearch]
+  );
+
+  const handleChange = (e: ChangeEvent<HTMLInputElement>) => {
+    setValue(e.target.value);
+    debouncedSearch(e.target.value);
+  };
+
+  return <input value={value} onChange={handleChange} />;
+}
+
+// SearchInput.test.tsx
+describe('SearchInput', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('debounces search calls', async () => {
+    const onSearch = vi.fn();
+    render(<SearchInput onSearch={onSearch} />);
+
+    const input = screen.getByRole('textbox');
+
+    // Type quickly
+    await userEvent.type(input, 'test', { delay: null });
+
+    // Search not called yet
+    expect(onSearch).not.toHaveBeenCalled();
+
+    // Advance past debounce delay
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+
+    // Now search is called once with final value
+    expect(onSearch).toHaveBeenCalledTimes(1);
+    expect(onSearch).toHaveBeenCalledWith('test');
+  });
+});
+```
+
+### Mocking Date
+
+```typescript
+describe('Date mocking', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2024-01-15T10:00:00Z'));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('uses mocked date', () => {
+    expect(new Date().toISOString()).toBe('2024-01-15T10:00:00.000Z');
+    expect(Date.now()).toBe(1705312800000);
+  });
+
+  it('advances time', () => {
+    const initialDate = new Date();
+
+    vi.advanceTimersByTime(60000); // 1 minute
+
+    const newDate = new Date();
+    expect(newDate.getTime() - initialDate.getTime()).toBe(60000);
+  });
+});
+```
+
+## Browser API Mocking
+
+### localStorage
+
+```typescript
+// Simple mock
+const localStorageMock = {
+  getItem: vi.fn(),
+  setItem: vi.fn(),
+  removeItem: vi.fn(),
+  clear: vi.fn(),
+};
+
+Object.defineProperty(window, 'localStorage', {
+  value: localStorageMock,
+});
+
+// Test
+describe('useLocalStorage', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('reads from localStorage', () => {
+    localStorageMock.getItem.mockReturnValue('"stored value"');
+
+    const { result } = renderHook(() => useLocalStorage('key', 'default'));
+
+    expect(result.current[0]).toBe('stored value');
+    expect(localStorageMock.getItem).toHaveBeenCalledWith('key');
+  });
+
+  it('writes to localStorage', () => {
+    const { result } = renderHook(() => useLocalStorage('key', 'default'));
+
+    act(() => {
+      result.current[1]('new value');
+    });
+
+    expect(localStorageMock.setItem).toHaveBeenCalledWith('key', '"new value"');
+  });
+});
+```
+
+### matchMedia
+
+```typescript
+function createMatchMedia(matches: boolean) {
+  return (query: string) => ({
+    matches,
+    media: query,
+    onchange: null,
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  });
+}
+
+describe('useMediaQuery', () => {
+  it('returns true when media query matches', () => {
+    window.matchMedia = createMatchMedia(true);
+
+    const { result } = renderHook(() => useMediaQuery('(min-width: 768px)'));
+
+    expect(result.current).toBe(true);
+  });
+
+  it('returns false when media query does not match', () => {
+    window.matchMedia = createMatchMedia(false);
+
+    const { result } = renderHook(() => useMediaQuery('(min-width: 768px)'));
+
+    expect(result.current).toBe(false);
+  });
+});
+```
+
+### Geolocation
+
+```typescript
+const mockGeolocation = {
+  getCurrentPosition: vi.fn(),
+  watchPosition: vi.fn(),
+  clearWatch: vi.fn(),
+};
+
+Object.defineProperty(navigator, 'geolocation', {
+  value: mockGeolocation,
+  writable: true,
+});
+
+describe('useLocation', () => {
+  it('returns user location', async () => {
+    mockGeolocation.getCurrentPosition.mockImplementation((success) => {
+      success({
+        coords: {
+          latitude: 37.7749,
+          longitude: -122.4194,
+        },
+      });
+    });
+
+    const { result } = renderHook(() => useLocation());
+
+    await waitFor(() => {
+      expect(result.current.latitude).toBe(37.7749);
+      expect(result.current.longitude).toBe(-122.4194);
+    });
+  });
+
+  it('handles geolocation error', async () => {
+    mockGeolocation.getCurrentPosition.mockImplementation((_, error) => {
+      error({ code: 1, message: 'User denied' });
+    });
+
+    const { result } = renderHook(() => useLocation());
+
+    await waitFor(() => {
+      expect(result.current.error).toBe('User denied');
+    });
+  });
+});
+```
+
+### IntersectionObserver
+
+```typescript
+class MockIntersectionObserver {
+  readonly root = null;
+  readonly rootMargin = '';
+  readonly thresholds = [];
+
+  constructor(private callback: IntersectionObserverCallback) {}
+
+  observe = vi.fn();
+  unobserve = vi.fn();
+  disconnect = vi.fn();
+  takeRecords = vi.fn();
+
+  // Helper to simulate intersection
+  simulateIntersection(entries: Partial<IntersectionObserverEntry>[]) {
+    this.callback(entries as IntersectionObserverEntry[], this);
+  }
+}
+
+let observerInstance: MockIntersectionObserver;
+
+beforeEach(() => {
+  window.IntersectionObserver = vi.fn().mockImplementation((callback) => {
+    observerInstance = new MockIntersectionObserver(callback);
+    return observerInstance;
+  });
+});
+
+describe('LazyImage', () => {
+  it('loads image when visible', async () => {
+    render(<LazyImage src="/image.jpg" alt="Test" />);
+
+    // Initially not loaded
+    expect(screen.queryByRole('img')).not.toBeInTheDocument();
+
+    // Simulate becoming visible
+    act(() => {
+      observerInstance.simulateIntersection([{ isIntersecting: true }]);
+    });
+
+    // Now image should load
+    await waitFor(() => {
+      expect(screen.getByRole('img')).toHaveAttribute('src', '/image.jpg');
+    });
+  });
+});
+```
+
+## Mocking Components
+
+<Callout type="warn">
+Mocking React components should be rare. Prefer testing with real components when possible.
+</Callout>
+
+### When Component Mocking is Justified
+
+```typescript
+// Mock a heavy visualization component
+vi.mock('./Chart', () => ({
+  Chart: ({ data }: { data: number[] }) => (
+    <div data-testid="mock-chart">Chart: {data.length} points</div>
+  ),
+}));
+
+// Mock a third-party component with external dependencies
+vi.mock('react-map-gl', () => ({
+  Map: ({ children }: { children: React.ReactNode }) => (
+    <div data-testid="mock-map">{children}</div>
+  ),
+  Marker: ({ latitude, longitude }: { latitude: number; longitude: number }) => (
+    <div data-testid="mock-marker">{`${latitude},${longitude}`}</div>
+  ),
+}));
+```
+
+## Pros and Cons
+
+| Pros | Cons |
+|------|------|
+| Isolates code under test | Can hide integration bugs |
+| Fast test execution | Tests may pass but code fails |
+| Controls external dependencies | Maintenance overhead |
+| Tests edge cases easily | Can lead to over-mocking |
+| Deterministic results | May test implementation details |
+
+## When to Mock
+
+| Mock | Don't Mock |
+|------|------------|
+| Network requests | Internal functions |
+| Browser APIs | Simple utilities |
+| External services | Pure components |
+| Timers | State management |
+| Heavy third-party libs | React hooks (usually) |
+
+## When NOT to Mock
+
+<Callout type="info">
+The more you mock, the less confidence your tests provide. Mock only what you must.
+</Callout>
+
+- Internal project modules (test integration instead)
+- Simple utility functions (test directly)
+- React state and effects (test behavior)
+- Components you control (render them)
+- Database queries in integration tests (use test DB)
+
+## Best Practices Summary
+
+| Practice | Description |
+|----------|-------------|
+| Mock at boundaries | Network, timers, browser APIs |
+| Use MSW for network | More realistic than manual mocks |
+| Reset mocks between tests | Prevent test pollution |
+| Type your mocks | Use `vi.mocked()` for TypeScript |
+| Avoid over-mocking | More mocks = less confidence |
+| Document mock behavior | Make expectations clear |
+| Prefer spies over mocks | When just observing calls |

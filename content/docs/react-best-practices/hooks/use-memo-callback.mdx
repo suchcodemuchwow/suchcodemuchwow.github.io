@@ -1,0 +1,436 @@
+---
+title: useMemo & useCallback
+description: When and how to use React's memoization hooks
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## When to Actually Use Them
+
+Both hooks exist for two primary purposes:
+
+| Hook | Purpose |
+|------|---------|
+| `useMemo` | Skip expensive recalculations |
+| `useCallback` | Keep stable function references |
+
+<Callout type="warn" title="Premature Optimization">
+Most components don't need these hooks. Memoization has costs: memory overhead, dependency tracking, and code complexity. Only use when you have a measured performance problem.
+</Callout>
+
+### You Probably Don't Need useMemo/useCallback
+
+```tsx
+// Unnecessary: simple calculations are fast
+const doubled = useMemo(() => count * 2, [count]); // Overkill
+const doubled = count * 2; // Just do this
+
+// Unnecessary: no child components care about reference
+const handleClick = useCallback(() => {
+  console.log('clicked');
+}, []); // Overkill if no memoized children
+
+const handleClick = () => console.log('clicked'); // Fine
+```
+
+---
+
+## Premature Optimization Warning
+
+### Measuring Performance
+
+Before adding memoization, measure:
+
+```tsx
+// Profile with console.time
+function ExpensiveComponent({ items }: { items: Item[] }) {
+  console.time('processing');
+  const processed = items.map(/* complex transformation */);
+  console.timeEnd('processing');
+
+  // If this logs < 1ms, useMemo is overkill
+}
+```
+
+### Cost of Memoization
+
+| Cost | Description |
+|------|-------------|
+| Memory | Cached values stay in memory |
+| Comparison | Dependencies compared every render |
+| Complexity | Harder to read, maintain, debug |
+| False security | Wrong deps = stale values |
+
+### When Memoization Helps
+
+| Scenario | Helps? |
+|----------|--------|
+| Filtering 10 items | No |
+| Filtering 10,000 items | Maybe |
+| Creating new object passed to memoized child | Yes |
+| Simple math operations | No |
+| Complex recursive calculations | Yes |
+| Stable callback for useEffect dependency | Yes |
+| Callback passed to 50 memoized list items | Yes |
+
+---
+
+## Referential Equality
+
+JavaScript compares objects by reference, not value:
+
+```tsx
+{} === {} // false
+[] === [] // false
+(() => {}) === (() => {}) // false
+
+const obj = {};
+obj === obj // true (same reference)
+```
+
+This matters for:
+- `useEffect` dependencies
+- `React.memo` prop comparison
+- `useMemo` dependencies
+
+```tsx
+function Parent() {
+  // New object every render
+  const config = { theme: 'dark' };
+
+  // Child re-renders even if "theme" hasn't changed
+  return <MemoizedChild config={config} />;
+}
+
+// Fix with useMemo
+function Parent() {
+  const config = useMemo(() => ({ theme: 'dark' }), []);
+
+  // Child only re-renders if config actually changes
+  return <MemoizedChild config={config} />;
+}
+```
+
+---
+
+## Expensive Calculations
+
+### When useMemo Is Worth It
+
+```tsx
+function SearchResults({ items, query }: Props) {
+  // Expensive: complex filtering and sorting of large dataset
+  const filteredItems = useMemo(() => {
+    return items
+      .filter(item => matchesQuery(item, query))
+      .sort(complexSortAlgorithm)
+      .slice(0, 100);
+  }, [items, query]);
+
+  return <List items={filteredItems} />;
+}
+```
+
+### Lazy Complex Computations
+
+For one-time expensive setup:
+
+```tsx
+function HeavyComponent() {
+  // Only computed once
+  const complexData = useMemo(() => {
+    return buildComplexDataStructure();
+  }, []);
+}
+```
+
+### Deriving Data
+
+```tsx
+interface Item {
+  id: string;
+  category: string;
+  price: number;
+}
+
+function Dashboard({ items }: { items: Item[] }) {
+  // Group items by category
+  const byCategory = useMemo(() => {
+    return items.reduce((acc, item) => {
+      const group = acc.get(item.category) ?? [];
+      group.push(item);
+      acc.set(item.category, group);
+      return acc;
+    }, new Map<string, Item[]>());
+  }, [items]);
+
+  // Calculate totals
+  const totals = useMemo(() => {
+    let totalPrice = 0;
+    let itemCount = 0;
+
+    for (const item of items) {
+      totalPrice += item.price;
+      itemCount += 1;
+    }
+
+    return { totalPrice, itemCount, average: totalPrice / itemCount };
+  }, [items]);
+
+  return (/* ... */);
+}
+```
+
+---
+
+## Stable Callbacks for Children
+
+### Problem: New Function Reference
+
+```tsx
+function TodoList({ todos }: { todos: Todo[] }) {
+  // New function on every render
+  const handleToggle = (id: string) => {
+    toggleTodo(id);
+  };
+
+  // All TodoItems re-render even if their todo hasn't changed
+  return todos.map(todo => (
+    <MemoizedTodoItem
+      key={todo.id}
+      todo={todo}
+      onToggle={handleToggle} // New reference each time
+    />
+  ));
+}
+```
+
+### Solution: useCallback
+
+```tsx
+function TodoList({ todos }: { todos: Todo[] }) {
+  const handleToggle = useCallback((id: string) => {
+    toggleTodo(id);
+  }, []); // Stable reference
+
+  return todos.map(todo => (
+    <MemoizedTodoItem
+      key={todo.id}
+      todo={todo}
+      onToggle={handleToggle} // Same reference
+    />
+  ));
+}
+
+// Child must be memoized for this to matter
+const MemoizedTodoItem = memo(function TodoItem({ todo, onToggle }: Props) {
+  return (
+    <div onClick={() => onToggle(todo.id)}>
+      {todo.text}
+    </div>
+  );
+});
+```
+
+<Callout type="info" title="Both Sides Matter">
+useCallback only helps if the child is wrapped in React.memo (or uses the callback in its own useEffect/useMemo dependencies).
+</Callout>
+
+---
+
+## Common Overuse Patterns
+
+### Overuse 1: Memoizing Everything
+
+```tsx
+// Over-engineered
+function OverMemoized({ name }: { name: string }) {
+  const greeting = useMemo(() => `Hello, ${name}!`, [name]);
+  const handleClick = useCallback(() => alert(greeting), [greeting]);
+
+  return <button onClick={handleClick}>{greeting}</button>;
+}
+
+// Simple and clear
+function Simple({ name }: { name: string }) {
+  const greeting = `Hello, ${name}!`;
+  const handleClick = () => alert(greeting);
+
+  return <button onClick={handleClick}>{greeting}</button>;
+}
+```
+
+### Overuse 2: Memoizing Without Memoized Consumers
+
+```tsx
+function Parent() {
+  // Useless: Child doesn't use React.memo
+  const data = useMemo(() => processData(items), [items]);
+  const handleClick = useCallback(() => {}, []);
+
+  return <Child data={data} onClick={handleClick} />; // Not memoized
+}
+
+function Child({ data, onClick }: Props) {
+  // This component re-renders on every Parent render anyway
+  return <div onClick={onClick}>{data.length}</div>;
+}
+```
+
+### Overuse 3: Wrong Dependencies
+
+```tsx
+// Bug: empty deps = stale closure
+const handleSubmit = useCallback(() => {
+  submitForm(formData); // Always submits initial formData
+}, []); // Missing formData dependency
+
+// Fix: include all dependencies
+const handleSubmit = useCallback(() => {
+  submitForm(formData);
+}, [formData]);
+```
+
+---
+
+## Correct Usage Patterns
+
+### Pattern 1: Expensive Computation
+
+```tsx
+function DataGrid({ rows, columns, filters }: Props) {
+  const processedRows = useMemo(() => {
+    return rows
+      .filter(row => matchesFilters(row, filters))
+      .map(row => enrichRowData(row, columns));
+  }, [rows, columns, filters]);
+
+  return <VirtualizedGrid rows={processedRows} />;
+}
+```
+
+### Pattern 2: Reference Stability for Effects
+
+```tsx
+function SearchComponent({ onResultsChange }: Props) {
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<Result[]>([]);
+
+  // Stable callback reference
+  const stableOnResultsChange = useCallback(onResultsChange, [onResultsChange]);
+
+  useEffect(() => {
+    if (results.length > 0) {
+      stableOnResultsChange(results);
+    }
+  }, [results, stableOnResultsChange]);
+}
+```
+
+### Pattern 3: Context Value
+
+```tsx
+function ThemeProvider({ children }: { children: ReactNode }) {
+  const [theme, setTheme] = useState<'light' | 'dark'>('light');
+
+  // Memoize to prevent unnecessary re-renders of all consumers
+  const value = useMemo(() => ({
+    theme,
+    setTheme,
+    toggleTheme: () => setTheme(t => t === 'light' ? 'dark' : 'light')
+  }), [theme]);
+
+  return (
+    <ThemeContext.Provider value={value}>
+      {children}
+    </ThemeContext.Provider>
+  );
+}
+```
+
+### Pattern 4: Memoized Children List
+
+```tsx
+function ItemList({ items, onItemClick }: Props) {
+  // Stable callback for all items
+  const handleClick = useCallback((id: string) => {
+    onItemClick(id);
+  }, [onItemClick]);
+
+  return (
+    <ul>
+      {items.map(item => (
+        <MemoizedItem
+          key={item.id}
+          item={item}
+          onClick={handleClick}
+        />
+      ))}
+    </ul>
+  );
+}
+
+const MemoizedItem = memo(function Item({ item, onClick }: ItemProps) {
+  return <li onClick={() => onClick(item.id)}>{item.name}</li>;
+});
+```
+
+---
+
+## Decision Flowchart
+
+```
+Need to memoize a value/function?
+│
+├─ Is it passed to a memoized child component?
+│  └─ YES → Consider useMemo/useCallback
+│
+├─ Is it a dependency of useEffect/useMemo?
+│  └─ YES → Consider useCallback for functions
+│
+├─ Is the calculation expensive (>1ms)?
+│  └─ YES → Use useMemo
+│
+├─ Is it in a Context Provider value?
+│  └─ YES → Use useMemo for the value object
+│
+└─ Otherwise → Probably don't need it
+```
+
+---
+
+## Quick Reference
+
+```tsx
+// useMemo: expensive calculation
+const sorted = useMemo(
+  () => items.sort((a, b) => a.name.localeCompare(b.name)),
+  [items]
+);
+
+// useMemo: stable object reference
+const config = useMemo(() => ({ theme, size }), [theme, size]);
+
+// useCallback: stable function reference
+const handleClick = useCallback((id: string) => {
+  selectItem(id);
+}, [selectItem]);
+
+// useCallback: for memoized children
+const onToggle = useCallback((id: string) => {
+  setSelected(prev => prev.includes(id)
+    ? prev.filter(i => i !== id)
+    : [...prev, id]
+  );
+}, []);
+
+// Context value memoization
+const ctxValue = useMemo(() => ({ state, dispatch }), [state]);
+```
+
+### Checklist Before Adding
+
+- [ ] Have I measured the performance problem?
+- [ ] Is the consumer memoized (React.memo or effect dependency)?
+- [ ] Are all dependencies correct?
+- [ ] Does the benefit outweigh the complexity cost?

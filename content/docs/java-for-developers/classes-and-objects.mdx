@@ -1,0 +1,214 @@
+---
+title: Classes and Objects
+description: Object-oriented programming patterns in Java
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## Class Anatomy
+
+A typical Java class structure:
+
+```java
+public class User {
+    // Fields
+    private final String id;
+    private String name;
+    private int age;
+
+    // Constructor
+    public User(String id, String name, int age) {
+        this.id = id;
+        this.name = name;
+        this.age = age;
+    }
+
+    // Methods
+    public String getName() {
+        return name;
+    }
+
+    public void setName(String name) {
+        this.name = name;
+    }
+}
+```
+
+---
+
+## Records (Java 16+)
+
+For immutable data carriers, use records:
+
+```java
+public record User(String id, String name, int age) {}
+
+// Usage
+var user = new User("123", "Alice", 30);
+String name = user.name();  // accessor method, not field
+```
+
+Records automatically provide:
+- Constructor with all fields
+- Accessor methods (not `getName()`, just `name()`)
+- `equals()`, `hashCode()`, `toString()`
+
+<Callout type="info" title="JS/TS delta">
+Records are similar to TypeScript interfaces with readonly properties, but they're actual classes with generated implementations.
+</Callout>
+
+---
+
+## Access Modifiers
+
+| Modifier | Class | Package | Subclass | World |
+|----------|-------|---------|----------|-------|
+| `public` | Yes | Yes | Yes | Yes |
+| `protected` | Yes | Yes | Yes | No |
+| (default) | Yes | Yes | No | No |
+| `private` | Yes | No | No | No |
+
+<Callout type="info" title="Go delta">
+Go uses capitalization (exported vs unexported). Java uses explicit keywords. Java's `protected` includes package access, unlike some other languages.
+</Callout>
+
+---
+
+## Inheritance
+
+### Extending Classes
+
+```java
+public class Employee extends User {
+    private String department;
+
+    public Employee(String id, String name, int age, String department) {
+        super(id, name, age);  // must call parent constructor
+        this.department = department;
+    }
+}
+```
+
+### Sealed Classes (Java 17+)
+
+Control which classes can extend yours:
+
+```java
+public sealed class Shape permits Circle, Rectangle, Triangle {
+    // ...
+}
+
+public final class Circle extends Shape { }
+public final class Rectangle extends Shape { }
+public final class Triangle extends Shape { }
+```
+
+---
+
+## Interfaces
+
+Interfaces define contracts:
+
+```java
+public interface Repository<T> {
+    T findById(String id);
+    List<T> findAll();
+    void save(T entity);
+    void delete(String id);
+}
+
+public class UserRepository implements Repository<User> {
+    @Override
+    public User findById(String id) { /* ... */ }
+    // ... implement other methods
+}
+```
+
+### Default Methods
+
+Interfaces can have default implementations:
+
+```java
+public interface Timestamped {
+    Instant getCreatedAt();
+
+    default boolean isRecent() {
+        return getCreatedAt().isAfter(Instant.now().minus(Duration.ofDays(7)));
+    }
+}
+```
+
+---
+
+## Static Members
+
+Static members belong to the class, not instances:
+
+```java
+public class Counter {
+    private static int count = 0;  // shared across all instances
+
+    public Counter() {
+        count++;
+    }
+
+    public static int getCount() {
+        return count;
+    }
+}
+```
+
+### Static Factory Methods
+
+Prefer static factory methods over constructors for flexibility:
+
+```java
+public class User {
+    private User(String id, String name) { /* ... */ }
+
+    public static User create(String name) {
+        return new User(UUID.randomUUID().toString(), name);
+    }
+
+    public static User fromId(String id, String name) {
+        return new User(id, name);
+    }
+}
+```
+
+---
+
+## Inner Classes
+
+### Static Nested Classes
+
+```java
+public class Outer {
+    public static class Nested {
+        // Can access Outer's static members only
+    }
+}
+
+var nested = new Outer.Nested();
+```
+
+### Inner Classes (Non-static)
+
+```java
+public class Outer {
+    private int value = 10;
+
+    public class Inner {
+        public int getValue() {
+            return value;  // Can access outer instance
+        }
+    }
+}
+
+var outer = new Outer();
+var inner = outer.new Inner();
+```
+
+<Callout type="warn" title="Memory Note">
+Non-static inner classes hold a reference to their enclosing instance, which can cause memory leaks. Prefer static nested classes when you don't need the outer reference.
+</Callout>

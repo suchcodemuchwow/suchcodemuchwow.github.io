@@ -1,0 +1,468 @@
+---
+title: Props Design
+description: Patterns for designing clear, flexible component props
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## Required vs Optional Props
+
+Design props based on whether the component can function without them.
+
+```tsx
+interface UserCardProps {
+  // Required: component needs these to work
+  userId: string;
+  name: string;
+
+  // Optional: have sensible defaults or are truly optional
+  avatarUrl?: string;
+  showBio?: boolean;
+  onSelect?: (id: string) => void;
+}
+
+function UserCard({
+  userId,
+  name,
+  avatarUrl,
+  showBio = false,
+  onSelect,
+}: UserCardProps) {
+  return (
+    <div onClick={() => onSelect?.(userId)}>
+      <img src={avatarUrl ?? '/default-avatar.png'} alt={name} />
+      <h2>{name}</h2>
+      {showBio && <Bio userId={userId} />}
+    </div>
+  );
+}
+```
+
+| Make Required | Make Optional |
+|---------------|---------------|
+| Core data the component displays | Feature flags |
+| Identity/key values | Customization options |
+| Props with no sensible default | Callbacks that enhance but aren't essential |
+
+<Callout type="info" title="Principle">
+If you find yourself always passing the same value, consider making it the default.
+</Callout>
+
+---
+
+## Default Values
+
+### Default Parameters vs defaultProps
+
+```tsx
+// Preferred: default parameters (works with TypeScript)
+function Button({
+  variant = 'primary',
+  size = 'medium',
+  disabled = false,
+}: ButtonProps) {
+  return <button className={`btn-${variant} btn-${size}`} disabled={disabled} />;
+}
+
+// Avoid: defaultProps (deprecated for function components)
+Button.defaultProps = {
+  variant: 'primary',
+  size: 'medium',
+};
+```
+
+### Default Values for Objects
+
+```tsx
+// Problem: default object creates new reference each render
+function Chart({ config = {} }: ChartProps) {
+  useEffect(() => {
+    // Runs every render because config is new object
+  }, [config]);
+}
+
+// Solution: define default outside component
+const DEFAULT_CONFIG: ChartConfig = {
+  showGrid: true,
+  animate: true,
+};
+
+function Chart({ config = DEFAULT_CONFIG }: ChartProps) {
+  // Stable reference now
+}
+
+// Or: merge with defaults inside
+function Chart({ config }: ChartProps) {
+  const mergedConfig = { ...DEFAULT_CONFIG, ...config };
+}
+```
+
+---
+
+## Prop Naming Conventions
+
+### General Guidelines
+
+| Convention | Example | Use For |
+|------------|---------|---------|
+| `is/has/can/should` prefix | `isLoading`, `hasError`, `canEdit` | Boolean state |
+| `on` prefix | `onClick`, `onSubmit`, `onChange` | Event callbacks |
+| Noun | `user`, `items`, `title` | Data values |
+| Adjective | `disabled`, `selected`, `hidden` | HTML attributes |
+
+```tsx
+interface FormProps {
+  // Data
+  initialValues: FormValues;
+  validationSchema: Schema;
+
+  // State flags
+  isSubmitting: boolean;
+  hasUnsavedChanges: boolean;
+
+  // Callbacks
+  onSubmit: (values: FormValues) => void;
+  onCancel: () => void;
+  onChange: (field: string, value: unknown) => void;
+}
+```
+
+### Avoid Ambiguous Names
+
+```tsx
+// Bad: ambiguous
+interface BadProps {
+  data: unknown;      // What kind of data?
+  info: object;       // What info?
+  handler: Function;  // Handler for what?
+  flag: boolean;      // What does it control?
+}
+
+// Good: specific
+interface GoodProps {
+  user: User;
+  contactInfo: ContactInfo;
+  onUserSelect: (user: User) => void;
+  isExpanded: boolean;
+}
+```
+
+---
+
+## Boolean Props
+
+### Naming Patterns
+
+```tsx
+// Prefer positive naming
+interface ButtonProps {
+  disabled?: boolean;      // Good
+  enabled?: boolean;       // Avoid - double negative confusion
+
+  isLoading?: boolean;     // Good
+  isNotLoading?: boolean;  // Bad
+}
+
+// Usage reads naturally
+<Button disabled />
+<Button isLoading />
+```
+
+### Boolean Shorthand
+
+```tsx
+// These are equivalent
+<Input disabled={true} />
+<Input disabled />
+
+// For false, omit or explicitly set
+<Input disabled={false} />
+<Input />  // disabled defaults to false/undefined
+```
+
+<Callout type="warn" title="Avoid Double Negatives">
+`{!isNotHidden && <Component />}` is confusing. Use `{isVisible && <Component />}`.
+</Callout>
+
+---
+
+## Callback Prop Naming
+
+### on vs handle Convention
+
+```tsx
+// Props: use "on" prefix
+interface ModalProps {
+  onClose: () => void;
+  onConfirm: (data: Data) => void;
+  onCancel: () => void;
+}
+
+// Internal handlers: use "handle" prefix
+function Modal({ onClose, onConfirm, onCancel }: ModalProps) {
+  const handleBackdropClick = (e: MouseEvent) => {
+    if (e.target === e.currentTarget) {
+      onClose();
+    }
+  };
+
+  const handleSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    onConfirm(formData);
+  };
+
+  return (
+    <div onClick={handleBackdropClick}>
+      <form onSubmit={handleSubmit}>
+        {/* ... */}
+      </form>
+    </div>
+  );
+}
+```
+
+| Prefix | Use For | Example |
+|--------|---------|---------|
+| `on` | Props passed to component | `onSubmit`, `onChange`, `onSelect` |
+| `handle` | Internal functions | `handleClick`, `handleSubmit` |
+
+---
+
+## Object Props vs Flat Props
+
+### When to Use Objects
+
+```tsx
+// Flat: few related props
+interface AvatarProps {
+  imageUrl: string;
+  altText: string;
+  size: 'sm' | 'md' | 'lg';
+}
+
+// Object: many related props or nested data
+interface UserProfileProps {
+  user: {
+    id: string;
+    name: string;
+    email: string;
+    avatar: string;
+    role: Role;
+    preferences: Preferences;
+  };
+}
+
+// Object: when data comes from API/store as object
+function UserProfile({ user }: UserProfileProps) {
+  return <div>{user.name}</div>;
+}
+```
+
+| Approach | Pros | Cons |
+|----------|------|------|
+| Flat props | Explicit dependencies, easier to memoize | Verbose with many props |
+| Object props | Matches data shape, fewer props | Harder to track which fields are used |
+
+### Destructuring Strategy
+
+```tsx
+// Option 1: Destructure at top level
+function UserCard({ id, name, email, avatar }: UserCardProps) {
+  return <div>{name}</div>;
+}
+
+// Option 2: Keep object, destructure in JSX
+function UserCard({ user }: { user: User }) {
+  return (
+    <div>
+      <span>{user.name}</span>
+      <span>{user.email}</span>
+    </div>
+  );
+}
+
+// Option 3: Destructure object prop
+function UserCard({ user }: { user: User }) {
+  const { name, email, avatar } = user;
+  return <div>{name}</div>;
+}
+```
+
+---
+
+## Discriminated Union Props
+
+Use discriminated unions for props that change shape based on type.
+
+```tsx
+// Bad: optional props create invalid states
+interface BadButtonProps {
+  variant: 'button' | 'link';
+  onClick?: () => void;  // Required for button
+  href?: string;         // Required for link
+}
+
+// Good: discriminated union
+type ButtonProps =
+  | {
+      variant: 'button';
+      onClick: () => void;
+    }
+  | {
+      variant: 'link';
+      href: string;
+    };
+
+function Button(props: ButtonProps) {
+  if (props.variant === 'link') {
+    return <a href={props.href}>Link</a>;
+  }
+  return <button onClick={props.onClick}>Button</button>;
+}
+
+// Usage - TypeScript enforces correct props
+<Button variant="link" href="/home" />      // Valid
+<Button variant="button" onClick={fn} />     // Valid
+<Button variant="link" onClick={fn} />       // Error!
+```
+
+### Complex Discriminated Unions
+
+```tsx
+type AlertProps =
+  | {
+      type: 'info' | 'success';
+      message: string;
+    }
+  | {
+      type: 'error';
+      message: string;
+      onRetry: () => void;
+    }
+  | {
+      type: 'confirm';
+      message: string;
+      onConfirm: () => void;
+      onCancel: () => void;
+    };
+
+function Alert(props: AlertProps) {
+  switch (props.type) {
+    case 'info':
+    case 'success':
+      return <div className={props.type}>{props.message}</div>;
+
+    case 'error':
+      return (
+        <div className="error">
+          {props.message}
+          <button onClick={props.onRetry}>Retry</button>
+        </div>
+      );
+
+    case 'confirm':
+      return (
+        <div className="confirm">
+          {props.message}
+          <button onClick={props.onConfirm}>Yes</button>
+          <button onClick={props.onCancel}>No</button>
+        </div>
+      );
+  }
+}
+```
+
+<Callout type="info" title="Type Safety">
+Discriminated unions eliminate impossible states. TypeScript will error if you access props that don't exist for the current variant.
+</Callout>
+
+---
+
+## Rest/Spread Props Patterns
+
+### Forwarding DOM Attributes
+
+```tsx
+interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
+  label: string;
+  error?: string;
+}
+
+function Input({ label, error, ...inputProps }: InputProps) {
+  return (
+    <div>
+      <label>{label}</label>
+      <input {...inputProps} />
+      {error && <span className="error">{error}</span>}
+    </div>
+  );
+}
+
+// All standard input attributes work
+<Input
+  label="Email"
+  type="email"
+  placeholder="Enter email"
+  required
+  autoComplete="email"
+/>
+```
+
+### Omitting Specific Props
+
+```tsx
+// Prevent certain props from being passed through
+interface CustomInputProps extends Omit<
+  React.InputHTMLAttributes<HTMLInputElement>,
+  'size' | 'className'
+> {
+  size: 'sm' | 'md' | 'lg';  // Our own size prop
+  error?: string;
+}
+
+function CustomInput({ size, error, ...props }: CustomInputProps) {
+  return (
+    <input
+      className={`input-${size} ${error ? 'input-error' : ''}`}
+      {...props}
+    />
+  );
+}
+```
+
+### Extracting Props for Multiple Elements
+
+```tsx
+interface CardProps {
+  title: string;
+  children: React.ReactNode;
+  // Props for the container
+  containerProps?: React.HTMLAttributes<HTMLDivElement>;
+  // Props for the header
+  headerProps?: React.HTMLAttributes<HTMLElement>;
+}
+
+function Card({ title, children, containerProps, headerProps }: CardProps) {
+  return (
+    <div className="card" {...containerProps}>
+      <header className="card-header" {...headerProps}>
+        <h2>{title}</h2>
+      </header>
+      <div className="card-body">{children}</div>
+    </div>
+  );
+}
+```
+
+---
+
+## Props Design Checklist
+
+| Question | Guidance |
+|----------|----------|
+| Can the component work without this prop? | Make optional with default |
+| Is this prop always the same value? | Consider making it the default |
+| Do these props always go together? | Consider grouping or discriminated union |
+| Can this prop be computed from others? | Don't accept it, derive it |
+| Is this for internal use only? | Don't expose in public API |
+| Could invalid prop combinations occur? | Use discriminated unions |

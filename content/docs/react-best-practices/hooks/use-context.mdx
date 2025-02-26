@@ -1,0 +1,568 @@
+---
+title: useContext Patterns
+description: Sharing state across components with React Context
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## Overview
+
+useContext provides a way to share values between components without passing props through every level. Combined with createContext, it enables global state patterns for themes, authentication, and application-wide settings.
+
+---
+
+## When to Use
+
+- Theme or locale settings across the app
+- Authentication state (current user, permissions)
+- Application configuration that rarely changes
+- Dependency injection for services
+- Sharing state between deeply nested components
+- Avoiding prop drilling beyond 3-4 levels
+
+## When NOT to Use
+
+- Passing props 1-2 levels deep (just use props)
+- Frequently changing values (causes re-renders)
+- Server/async data (use data fetching patterns)
+- Form state (keep local or use form solutions)
+- High-frequency updates like mouse position
+- When only a few components need the value
+
+---
+
+## Pros and Cons
+
+| Pros | Cons |
+|------|------|
+| Eliminates prop drilling | All consumers re-render on change |
+| Clean API for global state | Can hide data flow/dependencies |
+| Works with useReducer | Performance overhead if overused |
+| Built into React | No selector pattern (without extra code) |
+| Type-safe with TypeScript | Provider nesting can get deep |
+| Easy to test with custom providers | Debugging can be harder |
+
+---
+
+## Creating Typed Contexts
+
+### Basic Pattern
+
+```tsx
+import { createContext, useContext, useState, ReactNode } from 'react';
+
+// 1. Define the context value type
+interface ThemeContextValue {
+  theme: 'light' | 'dark';
+  setTheme: (theme: 'light' | 'dark') => void;
+}
+
+// 2. Create context with null default
+const ThemeContext = createContext<ThemeContextValue | null>(null);
+
+// 3. Create a custom hook with null check
+function useTheme(): ThemeContextValue {
+  const context = useContext(ThemeContext);
+  if (context === null) {
+    throw new Error('useTheme must be used within a ThemeProvider');
+  }
+  return context;
+}
+
+// 4. Create the provider component
+function ThemeProvider({ children }: { children: ReactNode }) {
+  const [theme, setTheme] = useState<'light' | 'dark'>('light');
+
+  return (
+    <ThemeContext.Provider value={{ theme, setTheme }}>
+      {children}
+    </ThemeContext.Provider>
+  );
+}
+
+// 5. Usage
+function ThemedButton() {
+  const { theme, setTheme } = useTheme();
+
+  return (
+    <button onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}>
+      Current: {theme}
+    </button>
+  );
+}
+```
+
+<Callout type="info" title="Why null Default?">
+Using `null` with a type guard ensures consumers get a clear error if they forget the Provider, rather than silently using undefined values.
+</Callout>
+
+---
+
+## Default Value Patterns
+
+### Pattern 1: Null with Type Guard (Recommended)
+
+```tsx
+const AuthContext = createContext<AuthContextValue | null>(null);
+
+function useAuth(): AuthContextValue {
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error('useAuth must be used within AuthProvider');
+  }
+  return context;
+}
+```
+
+### Pattern 2: Undefined-Safe Defaults
+
+When you want components to work without a provider:
+
+```tsx
+interface FeatureFlagsValue {
+  flags: Record<string, boolean>;
+  isEnabled: (flag: string) => boolean;
+}
+
+const defaultValue: FeatureFlagsValue = {
+  flags: {},
+  isEnabled: () => false // Safe default
+};
+
+const FeatureFlagsContext = createContext<FeatureFlagsValue>(defaultValue);
+
+// Works without provider - returns defaults
+function useFeatureFlags() {
+  return useContext(FeatureFlagsContext);
+}
+```
+
+### Pattern 3: Optional Context
+
+```tsx
+const OptionalContext = createContext<ConfigValue | undefined>(undefined);
+
+function useOptionalConfig() {
+  return useContext(OptionalContext); // Can be undefined
+}
+
+function Component() {
+  const config = useOptionalConfig();
+
+  if (!config) {
+    // Handle absence of provider
+    return <DefaultBehavior />;
+  }
+
+  return <ConfiguredBehavior config={config} />;
+}
+```
+
+---
+
+## Context Composition
+
+### Multiple Contexts
+
+```tsx
+// Separate concerns into different contexts
+function App() {
+  return (
+    <AuthProvider>
+      <ThemeProvider>
+        <NotificationProvider>
+          <AppContent />
+        </NotificationProvider>
+      </ThemeProvider>
+    </AuthProvider>
+  );
+}
+```
+
+### Combining Providers Helper
+
+```tsx
+type Provider = ({ children }: { children: ReactNode }) => JSX.Element;
+
+function composeProviders(...providers: Provider[]) {
+  return function ComposedProviders({ children }: { children: ReactNode }) {
+    return providers.reduceRight(
+      (acc, Provider) => <Provider>{acc}</Provider>,
+      children
+    );
+  };
+}
+
+const AppProviders = composeProviders(
+  AuthProvider,
+  ThemeProvider,
+  NotificationProvider
+);
+
+function App() {
+  return (
+    <AppProviders>
+      <AppContent />
+    </AppProviders>
+  );
+}
+```
+
+### Nested Context for Scoped Values
+
+```tsx
+const DepthContext = createContext(0);
+
+function useDepth() {
+  return useContext(DepthContext);
+}
+
+function NestedContainer({ children }: { children: ReactNode }) {
+  const parentDepth = useDepth();
+
+  return (
+    <DepthContext.Provider value={parentDepth + 1}>
+      <div style={{ marginLeft: parentDepth * 20 }}>
+        {children}
+      </div>
+    </DepthContext.Provider>
+  );
+}
+```
+
+---
+
+## Performance Optimization
+
+### Problem: Context Changes Re-render All Consumers
+
+```tsx
+// Every consumer re-renders when ANY part of value changes
+interface AppContextValue {
+  user: User;
+  theme: Theme;
+  notifications: Notification[];
+  // ... many more values
+}
+
+const AppContext = createContext<AppContextValue | null>(null);
+
+// When notifications update, components only using 'theme' still re-render
+```
+
+### Solution 1: Split Contexts
+
+```tsx
+// Separate contexts for different update frequencies
+const UserContext = createContext<UserContextValue | null>(null);
+const ThemeContext = createContext<ThemeContextValue | null>(null);
+const NotificationContext = createContext<NotificationContextValue | null>(null);
+
+// Components only subscribe to what they need
+function UserProfile() {
+  const { user } = useUser(); // Only re-renders on user changes
+  return <div>{user.name}</div>;
+}
+
+function ThemeToggle() {
+  const { theme } = useTheme(); // Only re-renders on theme changes
+  return <button>{theme}</button>;
+}
+```
+
+### Solution 2: Memoize Context Value
+
+```tsx
+function ThemeProvider({ children }: { children: ReactNode }) {
+  const [theme, setTheme] = useState<'light' | 'dark'>('light');
+
+  // Memoize to prevent unnecessary re-renders
+  const value = useMemo(() => ({
+    theme,
+    setTheme,
+    toggleTheme: () => setTheme(t => t === 'light' ? 'dark' : 'light')
+  }), [theme]); // Only recreate when theme changes
+
+  return (
+    <ThemeContext.Provider value={value}>
+      {children}
+    </ThemeContext.Provider>
+  );
+}
+```
+
+<Callout type="warn" title="Object Literals">
+Without useMemo, `value={{ theme, setTheme }}` creates a new object every render, causing all consumers to re-render.
+</Callout>
+
+### Solution 3: Separate State and Dispatch
+
+```tsx
+// Separate contexts for state and dispatch
+const CountStateContext = createContext<number>(0);
+const CountDispatchContext = createContext<Dispatch<CountAction>>(() => {});
+
+function CountProvider({ children }: { children: ReactNode }) {
+  const [count, dispatch] = useReducer(countReducer, 0);
+
+  return (
+    <CountStateContext.Provider value={count}>
+      <CountDispatchContext.Provider value={dispatch}>
+        {children}
+      </CountDispatchContext.Provider>
+    </CountStateContext.Provider>
+  );
+}
+
+// Components that only dispatch don't re-render on state changes
+function IncrementButton() {
+  const dispatch = useContext(CountDispatchContext);
+  return <button onClick={() => dispatch({ type: 'INCREMENT' })}>+</button>;
+}
+
+// Components that read state re-render when it changes
+function CountDisplay() {
+  const count = useContext(CountStateContext);
+  return <span>{count}</span>;
+}
+```
+
+### Solution 4: Selector Pattern (Manual)
+
+```tsx
+interface StoreState {
+  users: User[];
+  products: Product[];
+  cart: CartItem[];
+}
+
+const StoreContext = createContext<StoreState | null>(null);
+
+// Custom hook with selector
+function useStoreSelector<T>(selector: (state: StoreState) => T): T {
+  const state = useContext(StoreContext);
+  if (!state) throw new Error('Must be within StoreProvider');
+
+  return selector(state);
+}
+
+// Component only re-renders when selected value changes
+// (requires React.memo or useSyncExternalStore for true optimization)
+function CartCount() {
+  const cartLength = useStoreSelector(state => state.cart.length);
+  return <span>{cartLength}</span>;
+}
+```
+
+---
+
+## When NOT to Use Context
+
+### For Prop Drilling Avoidance Only
+
+```tsx
+// Bad: Context for passing to immediate children
+function Parent() {
+  const [value, setValue] = useState(0);
+
+  return (
+    <ValueContext.Provider value={value}>
+      <Child />
+    </ValueContext.Provider>
+  );
+}
+
+// Better: Just pass props
+function Parent() {
+  const [value, setValue] = useState(0);
+
+  return <Child value={value} />;
+}
+```
+
+### For Frequently Changing Values
+
+```tsx
+// Bad: Mouse position changes constantly
+const MouseContext = createContext({ x: 0, y: 0 });
+
+function MouseProvider({ children }) {
+  const [position, setPosition] = useState({ x: 0, y: 0 });
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => setPosition({ x: e.clientX, y: e.clientY });
+    window.addEventListener('mousemove', handler);
+    return () => window.removeEventListener('mousemove', handler);
+  }, []);
+
+  // Every mouse move re-renders ALL consumers!
+  return (
+    <MouseContext.Provider value={position}>
+      {children}
+    </MouseContext.Provider>
+  );
+}
+
+// Better: Use a custom hook with event listener per component
+function useMousePosition() {
+  const [position, setPosition] = useState({ x: 0, y: 0 });
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => setPosition({ x: e.clientX, y: e.clientY });
+    window.addEventListener('mousemove', handler);
+    return () => window.removeEventListener('mousemove', handler);
+  }, []);
+
+  return position;
+}
+```
+
+### For Server State
+
+```tsx
+// Context not ideal for server data with loading/error states
+// Use dedicated data fetching patterns instead
+
+// Don't do this
+const UserDataContext = createContext<{
+  user: User | null;
+  loading: boolean;
+  error: Error | null;
+} | null>(null);
+
+// Better: Co-locate fetching with components that need it
+// or use suspense with proper data fetching patterns
+```
+
+---
+
+## Context vs Alternatives
+
+| Need | Solution |
+|------|----------|
+| Global theme/locale | Context |
+| Auth state | Context |
+| Prop drilling 2-3 levels | Props (not context) |
+| Server state | Data fetching hooks |
+| Form state | Form library or local state |
+| High-frequency updates | Local state or subscriptions |
+| Complex app state | useReducer + Context or state library |
+
+---
+
+## Complete Example: Auth Context
+
+```tsx
+import { createContext, useContext, useState, useCallback, useMemo, ReactNode } from 'react';
+
+interface User {
+  id: string;
+  email: string;
+  name: string;
+}
+
+interface AuthContextValue {
+  user: User | null;
+  isAuthenticated: boolean;
+  login: (email: string, password: string) => Promise<void>;
+  logout: () => void;
+}
+
+const AuthContext = createContext<AuthContextValue | null>(null);
+
+export function useAuth(): AuthContextValue {
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error('useAuth must be used within AuthProvider');
+  }
+  return context;
+}
+
+export function AuthProvider({ children }: { children: ReactNode }) {
+  const [user, setUser] = useState<User | null>(null);
+
+  const login = useCallback(async (email: string, password: string) => {
+    const response = await fetch('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password })
+    });
+
+    if (!response.ok) {
+      throw new Error('Login failed');
+    }
+
+    const userData = await response.json();
+    setUser(userData);
+  }, []);
+
+  const logout = useCallback(() => {
+    setUser(null);
+    // Clear tokens, redirect, etc.
+  }, []);
+
+  const value = useMemo(() => ({
+    user,
+    isAuthenticated: user !== null,
+    login,
+    logout
+  }), [user, login, logout]);
+
+  return (
+    <AuthContext.Provider value={value}>
+      {children}
+    </AuthContext.Provider>
+  );
+}
+
+// Usage
+function LoginButton() {
+  const { isAuthenticated, login, logout } = useAuth();
+
+  if (isAuthenticated) {
+    return <button onClick={logout}>Logout</button>;
+  }
+
+  return (
+    <button onClick={() => login('user@example.com', 'password')}>
+      Login
+    </button>
+  );
+}
+
+function UserGreeting() {
+  const { user, isAuthenticated } = useAuth();
+
+  if (!isAuthenticated) {
+    return <p>Please log in</p>;
+  }
+
+  return <p>Welcome, {user?.name}!</p>;
+}
+```
+
+---
+
+## Quick Reference
+
+```tsx
+// Create typed context
+const MyContext = createContext<Value | null>(null);
+
+// Custom hook with guard
+function useMyContext() {
+  const ctx = useContext(MyContext);
+  if (!ctx) throw new Error('Missing Provider');
+  return ctx;
+}
+
+// Memoized provider value
+const value = useMemo(() => ({ state, actions }), [state]);
+
+// Split contexts for performance
+<StateContext.Provider value={state}>
+  <DispatchContext.Provider value={dispatch}>
+    {children}
+  </DispatchContext.Provider>
+</StateContext.Provider>
+```

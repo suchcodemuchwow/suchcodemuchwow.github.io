@@ -1,0 +1,464 @@
+---
+title: State Machines
+description: Using state machines for predictable complex UI state
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## State Machine Concepts
+
+A state machine defines:
+- **States**: Distinct modes your system can be in
+- **Events**: Triggers that cause state changes
+- **Transitions**: Rules for moving between states
+
+```
+┌─────────┐  FETCH   ┌─────────┐  SUCCESS  ┌─────────┐
+│  idle   │ ───────► │ loading │ ────────► │ success │
+└─────────┘          └─────────┘           └─────────┘
+     ▲                    │                      │
+     │                    │ FAILURE              │
+     │                    ▼                      │
+     │               ┌─────────┐                 │
+     └───── RETRY ── │  error  │ ◄───── RETRY ──┘
+                     └─────────┘
+```
+
+---
+
+## useReducer as State Machine
+
+Model explicit states with useReducer:
+
+```tsx
+type State =
+  | { status: 'idle' }
+  | { status: 'loading' }
+  | { status: 'success'; data: Data }
+  | { status: 'error'; error: Error };
+
+type Event =
+  | { type: 'FETCH' }
+  | { type: 'SUCCESS'; data: Data }
+  | { type: 'FAILURE'; error: Error }
+  | { type: 'RETRY' }
+  | { type: 'RESET' };
+
+function reducer(state: State, event: Event): State {
+  switch (state.status) {
+    case 'idle':
+      if (event.type === 'FETCH') return { status: 'loading' };
+      return state;
+
+    case 'loading':
+      if (event.type === 'SUCCESS') return { status: 'success', data: event.data };
+      if (event.type === 'FAILURE') return { status: 'error', error: event.error };
+      return state;
+
+    case 'success':
+      if (event.type === 'RETRY') return { status: 'loading' };
+      if (event.type === 'RESET') return { status: 'idle' };
+      return state;
+
+    case 'error':
+      if (event.type === 'RETRY') return { status: 'loading' };
+      if (event.type === 'RESET') return { status: 'idle' };
+      return state;
+  }
+}
+
+function DataFetcher({ url }: { url: string }) {
+  const [state, send] = useReducer(reducer, { status: 'idle' });
+
+  const fetchData = async () => {
+    send({ type: 'FETCH' });
+    try {
+      const response = await fetch(url);
+      const data = await response.json();
+      send({ type: 'SUCCESS', data });
+    } catch (error) {
+      send({ type: 'FAILURE', error: error as Error });
+    }
+  };
+
+  return (
+    <div>
+      {state.status === 'idle' && (
+        <button onClick={fetchData}>Load Data</button>
+      )}
+      {state.status === 'loading' && <Spinner />}
+      {state.status === 'success' && <DataDisplay data={state.data} />}
+      {state.status === 'error' && (
+        <div>
+          <p>Error: {state.error.message}</p>
+          <button onClick={() => send({ type: 'RETRY' })}>Retry</button>
+        </div>
+      )}
+    </div>
+  );
+}
+```
+
+<Callout type="info" title="Key Insight">
+The reducer checks the current state before handling events. This prevents impossible transitions.
+</Callout>
+
+---
+
+## Explicit States vs Boolean Flags
+
+### The Boolean Problem
+
+```tsx
+// Boolean flags: 8 possible combinations, most invalid
+const [isLoading, setIsLoading] = useState(false);
+const [isError, setIsError] = useState(false);
+const [isSuccess, setIsSuccess] = useState(false);
+
+// What does this mean?
+// isLoading: true, isError: true, isSuccess: true
+// Impossible state, but nothing prevents it
+```
+
+| Booleans | Combinations | Valid States | Invalid States |
+|----------|--------------|--------------|----------------|
+| 1 | 2 | 2 | 0 |
+| 2 | 4 | ~3 | ~1 |
+| 3 | 8 | ~4 | ~4 |
+| 4 | 16 | ~5 | ~11 |
+
+```tsx
+// Explicit states: only valid combinations possible
+type Status = 'idle' | 'loading' | 'success' | 'error';
+const [status, setStatus] = useState<Status>('idle');
+
+// TypeScript guarantees validity
+// Cannot be "loading" and "error" simultaneously
+```
+
+### Refactoring Booleans to States
+
+```tsx
+// Before: boolean soup
+function Modal() {
+  const [isOpen, setIsOpen] = useState(false);
+  const [isAnimating, setIsAnimating] = useState(false);
+  const [isClosing, setIsClosing] = useState(false);
+
+  // Complex, error-prone coordination
+  const open = () => {
+    setIsOpen(true);
+    setIsAnimating(true);
+    setTimeout(() => setIsAnimating(false), 300);
+  };
+}
+
+// After: explicit states
+type ModalState = 'closed' | 'opening' | 'open' | 'closing';
+
+function Modal() {
+  const [state, setState] = useState<ModalState>('closed');
+
+  const open = () => {
+    setState('opening');
+    setTimeout(() => setState('open'), 300);
+  };
+
+  const close = () => {
+    setState('closing');
+    setTimeout(() => setState('closed'), 300);
+  };
+
+  // Clear, impossible to have invalid combinations
+  return (
+    <div className={`modal modal--${state}`}>
+      {state !== 'closed' && <ModalContent />}
+    </div>
+  );
+}
+```
+
+---
+
+## Transition Validation
+
+State machines naturally prevent invalid transitions:
+
+```tsx
+type FormState =
+  | { status: 'editing'; values: FormValues; errors: ValidationErrors }
+  | { status: 'validating'; values: FormValues }
+  | { status: 'submitting'; values: FormValues }
+  | { status: 'submitted'; result: SubmitResult }
+  | { status: 'failed'; values: FormValues; error: Error };
+
+type FormEvent =
+  | { type: 'CHANGE'; field: string; value: string }
+  | { type: 'SUBMIT' }
+  | { type: 'VALIDATION_PASS' }
+  | { type: 'VALIDATION_FAIL'; errors: ValidationErrors }
+  | { type: 'SUBMIT_SUCCESS'; result: SubmitResult }
+  | { type: 'SUBMIT_FAILURE'; error: Error }
+  | { type: 'RESET' };
+
+function formReducer(state: FormState, event: FormEvent): FormState {
+  switch (state.status) {
+    case 'editing':
+      switch (event.type) {
+        case 'CHANGE':
+          return {
+            ...state,
+            values: { ...state.values, [event.field]: event.value },
+            errors: { ...state.errors, [event.field]: undefined },
+          };
+        case 'SUBMIT':
+          return { status: 'validating', values: state.values };
+        default:
+          return state;
+      }
+
+    case 'validating':
+      switch (event.type) {
+        case 'VALIDATION_PASS':
+          return { status: 'submitting', values: state.values };
+        case 'VALIDATION_FAIL':
+          return { status: 'editing', values: state.values, errors: event.errors };
+        default:
+          return state;
+      }
+
+    case 'submitting':
+      switch (event.type) {
+        case 'SUBMIT_SUCCESS':
+          return { status: 'submitted', result: event.result };
+        case 'SUBMIT_FAILURE':
+          return { status: 'failed', values: state.values, error: event.error };
+        default:
+          return state; // Ignore other events while submitting
+      }
+
+    case 'submitted':
+      if (event.type === 'RESET') {
+        return { status: 'editing', values: initialValues, errors: {} };
+      }
+      return state;
+
+    case 'failed':
+      switch (event.type) {
+        case 'SUBMIT':
+          return { status: 'validating', values: state.values };
+        case 'CHANGE':
+          return {
+            status: 'editing',
+            values: { ...state.values, [event.field]: event.value },
+            errors: {},
+          };
+        default:
+          return state;
+      }
+  }
+}
+```
+
+<Callout type="warn" title="Important">
+Notice how SUBMIT is ignored during `submitting` state. This prevents double-submit bugs automatically.
+</Callout>
+
+---
+
+## Complex UI Flows
+
+State machines excel at multi-step flows:
+
+```tsx
+type WizardState =
+  | { step: 'personal'; data: Partial<WizardData> }
+  | { step: 'address'; data: Partial<WizardData> }
+  | { step: 'payment'; data: Partial<WizardData> }
+  | { step: 'review'; data: WizardData }
+  | { step: 'processing'; data: WizardData }
+  | { step: 'complete'; orderId: string }
+  | { step: 'error'; data: WizardData; error: Error };
+
+type WizardEvent =
+  | { type: 'NEXT'; data: Partial<WizardData> }
+  | { type: 'BACK' }
+  | { type: 'SUBMIT' }
+  | { type: 'SUCCESS'; orderId: string }
+  | { type: 'FAILURE'; error: Error }
+  | { type: 'RESTART' };
+
+function wizardReducer(state: WizardState, event: WizardEvent): WizardState {
+  switch (state.step) {
+    case 'personal':
+      if (event.type === 'NEXT') {
+        return {
+          step: 'address',
+          data: { ...state.data, ...event.data },
+        };
+      }
+      return state;
+
+    case 'address':
+      if (event.type === 'NEXT') {
+        return {
+          step: 'payment',
+          data: { ...state.data, ...event.data },
+        };
+      }
+      if (event.type === 'BACK') {
+        return { step: 'personal', data: state.data };
+      }
+      return state;
+
+    case 'payment':
+      if (event.type === 'NEXT') {
+        const completeData = { ...state.data, ...event.data } as WizardData;
+        return { step: 'review', data: completeData };
+      }
+      if (event.type === 'BACK') {
+        return { step: 'address', data: state.data };
+      }
+      return state;
+
+    case 'review':
+      if (event.type === 'SUBMIT') {
+        return { step: 'processing', data: state.data };
+      }
+      if (event.type === 'BACK') {
+        return { step: 'payment', data: state.data };
+      }
+      return state;
+
+    case 'processing':
+      if (event.type === 'SUCCESS') {
+        return { step: 'complete', orderId: event.orderId };
+      }
+      if (event.type === 'FAILURE') {
+        return { step: 'error', data: state.data, error: event.error };
+      }
+      return state;
+
+    case 'complete':
+      if (event.type === 'RESTART') {
+        return { step: 'personal', data: {} };
+      }
+      return state;
+
+    case 'error':
+      if (event.type === 'SUBMIT') {
+        return { step: 'processing', data: state.data };
+      }
+      if (event.type === 'BACK') {
+        return { step: 'review', data: state.data };
+      }
+      return state;
+  }
+}
+
+function CheckoutWizard() {
+  const [state, send] = useReducer(wizardReducer, { step: 'personal', data: {} });
+
+  const CurrentStep = {
+    personal: PersonalInfoStep,
+    address: AddressStep,
+    payment: PaymentStep,
+    review: ReviewStep,
+    processing: ProcessingStep,
+    complete: CompleteStep,
+    error: ErrorStep,
+  }[state.step];
+
+  return (
+    <WizardContext.Provider value={{ state, send }}>
+      <WizardProgress currentStep={state.step} />
+      <CurrentStep />
+    </WizardContext.Provider>
+  );
+}
+```
+
+---
+
+## When State Machines Are Overkill
+
+State machines add complexity. Use them wisely:
+
+| Use State Machine | Use Simple State |
+|-------------------|------------------|
+| 4+ distinct states | 2-3 states |
+| Complex transitions | Linear flow |
+| Invalid state combinations possible | States independent |
+| Debugging state bugs | Straightforward logic |
+| Team needs shared mental model | Solo/small feature |
+
+### Simple Toggle: No Machine Needed
+
+```tsx
+// Overkill
+type ToggleState = { status: 'on' } | { status: 'off' };
+type ToggleEvent = { type: 'TOGGLE' };
+function toggleReducer(state: ToggleState, event: ToggleEvent): ToggleState {
+  if (event.type === 'TOGGLE') {
+    return state.status === 'on' ? { status: 'off' } : { status: 'on' };
+  }
+  return state;
+}
+
+// Just right
+const [isOn, setIsOn] = useState(false);
+const toggle = () => setIsOn(prev => !prev);
+```
+
+### Async Fetch: Maybe Machine
+
+```tsx
+// If just loading/error/success, this might be enough
+const [data, setData] = useState<Data | null>(null);
+const [error, setError] = useState<Error | null>(null);
+const [isLoading, setIsLoading] = useState(false);
+
+// If you need retry, reset, multiple fetch states, caching logic...
+// Then a state machine helps
+```
+
+<Callout type="info" title="Guideline">
+Start simple. Introduce a state machine when you find yourself adding boolean flags to track "modes" or debugging impossible state combinations.
+</Callout>
+
+---
+
+## State Machine Checklist
+
+| Question | Yes = Consider Machine |
+|----------|------------------------|
+| Are there 4+ distinct "modes"? | Yes |
+| Can the system be in invalid states? | Yes |
+| Are there complex transition rules? | Yes |
+| Do certain actions only work in certain states? | Yes |
+| Is the state logic hard to follow? | Yes |
+| Are there bugs from invalid state combos? | Yes |
+
+```tsx
+// Signs you need a state machine:
+
+// 1. Boolean soup
+const [isLoading, setIsLoading] = useState(false);
+const [hasError, setHasError] = useState(false);
+const [isRetrying, setIsRetrying] = useState(false);
+const [isSuccess, setIsSuccess] = useState(false);
+
+// 2. Defensive checks everywhere
+if (isLoading && !hasError && !isSuccess) { /* ... */ }
+
+// 3. State coordination bugs
+setIsLoading(false);
+setIsSuccess(true);
+// Forgot: setHasError(false); // Bug!
+
+// 4. Actions that should be ignored
+const handleSubmit = () => {
+  if (isLoading) return; // Manual guard
+  // ...
+};
+```

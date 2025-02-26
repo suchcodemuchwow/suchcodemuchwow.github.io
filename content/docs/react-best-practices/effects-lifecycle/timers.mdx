@@ -1,0 +1,784 @@
+---
+title: Timer Patterns
+description: Patterns for using setTimeout, setInterval, and requestAnimationFrame in React
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## setTimeout in React
+
+Run code after a delay with proper cleanup.
+
+```tsx
+import { useEffect, useState } from 'react';
+
+function DelayedNotification({ message, delay }: { message: string; delay: number }) {
+  const [show, setShow] = useState(false);
+
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      setShow(true);
+    }, delay);
+
+    return () => clearTimeout(timeoutId);
+  }, [delay]);
+
+  return show ? <div>{message}</div> : null;
+}
+```
+
+### Timeout with Reset
+
+```tsx
+function AutoDismiss({ children, duration = 3000 }: Props) {
+  const [visible, setVisible] = useState(true);
+
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      setVisible(false);
+    }, duration);
+
+    return () => clearTimeout(timeoutId);
+  }, [duration]);
+
+  // Reset when children change
+  useEffect(() => {
+    setVisible(true);
+  }, [children]);
+
+  return visible ? <div>{children}</div> : null;
+}
+```
+
+### Sequential Timeouts
+
+```tsx
+function TypewriterText({ text, speed = 50 }: { text: string; speed?: number }) {
+  const [displayed, setDisplayed] = useState('');
+
+  useEffect(() => {
+    if (displayed.length >= text.length) return;
+
+    const timeoutId = setTimeout(() => {
+      setDisplayed(text.slice(0, displayed.length + 1));
+    }, speed);
+
+    return () => clearTimeout(timeoutId);
+  }, [displayed, text, speed]);
+
+  // Reset when text changes
+  useEffect(() => {
+    setDisplayed('');
+  }, [text]);
+
+  return <span>{displayed}</span>;
+}
+```
+
+---
+
+## setInterval Patterns
+
+Run code repeatedly at fixed intervals.
+
+```tsx
+import { useEffect, useState } from 'react';
+
+function Timer() {
+  const [seconds, setSeconds] = useState(0);
+
+  useEffect(() => {
+    const intervalId = setInterval(() => {
+      setSeconds(s => s + 1);
+    }, 1000);
+
+    return () => clearInterval(intervalId);
+  }, []);
+
+  return <div>Elapsed: {seconds}s</div>;
+}
+```
+
+### Pausable Timer
+
+```tsx
+function Stopwatch() {
+  const [time, setTime] = useState(0);
+  const [isRunning, setIsRunning] = useState(false);
+
+  useEffect(() => {
+    if (!isRunning) return;
+
+    const intervalId = setInterval(() => {
+      setTime(t => t + 10);
+    }, 10);
+
+    return () => clearInterval(intervalId);
+  }, [isRunning]);
+
+  const formatTime = (ms: number) => {
+    const minutes = Math.floor(ms / 60000);
+    const seconds = Math.floor((ms % 60000) / 1000);
+    const centiseconds = Math.floor((ms % 1000) / 10);
+    return `${minutes}:${seconds.toString().padStart(2, '0')}.${centiseconds.toString().padStart(2, '0')}`;
+  };
+
+  return (
+    <div>
+      <div>{formatTime(time)}</div>
+      <button onClick={() => setIsRunning(!isRunning)}>
+        {isRunning ? 'Pause' : 'Start'}
+      </button>
+      <button onClick={() => { setIsRunning(false); setTime(0); }}>Reset</button>
+    </div>
+  );
+}
+```
+
+### Countdown Timer
+
+```tsx
+function Countdown({ targetDate }: { targetDate: Date }) {
+  const [remaining, setRemaining] = useState(() => calculateRemaining(targetDate));
+
+  useEffect(() => {
+    const intervalId = setInterval(() => {
+      const newRemaining = calculateRemaining(targetDate);
+      setRemaining(newRemaining);
+
+      if (newRemaining.total <= 0) {
+        clearInterval(intervalId);
+      }
+    }, 1000);
+
+    return () => clearInterval(intervalId);
+  }, [targetDate]);
+
+  if (remaining.total <= 0) {
+    return <div>Time is up!</div>;
+  }
+
+  return (
+    <div>
+      {remaining.days}d {remaining.hours}h {remaining.minutes}m {remaining.seconds}s
+    </div>
+  );
+}
+
+function calculateRemaining(targetDate: Date) {
+  const total = targetDate.getTime() - Date.now();
+  return {
+    total,
+    days: Math.floor(total / (1000 * 60 * 60 * 24)),
+    hours: Math.floor((total / (1000 * 60 * 60)) % 24),
+    minutes: Math.floor((total / 1000 / 60) % 60),
+    seconds: Math.floor((total / 1000) % 60),
+  };
+}
+```
+
+<Callout type="info">
+Always use the functional form of setState (`setTime(t => t + 1)`) in intervals to avoid stale closure issues.
+</Callout>
+
+---
+
+## Clearing Timers
+
+Proper cleanup prevents memory leaks and state updates on unmounted components.
+
+### Clear on Unmount
+
+```tsx
+function Notification({ onDismiss }: { onDismiss: () => void }) {
+  useEffect(() => {
+    const timeoutId = setTimeout(onDismiss, 5000);
+    return () => clearTimeout(timeoutId);
+  }, [onDismiss]);
+
+  return <div>This will dismiss in 5 seconds</div>;
+}
+```
+
+### Clear on Condition
+
+```tsx
+function PollingData({ url, interval }: { url: string; interval: number }) {
+  const [data, setData] = useState(null);
+  const [error, setError] = useState<Error | null>(null);
+
+  useEffect(() => {
+    let intervalId: number;
+
+    const fetchData = async () => {
+      try {
+        const response = await fetch(url);
+        const result = await response.json();
+        setData(result);
+      } catch (err) {
+        setError(err instanceof Error ? err : new Error('Unknown error'));
+        clearInterval(intervalId); // Stop polling on error
+      }
+    };
+
+    fetchData();
+    intervalId = window.setInterval(fetchData, interval);
+
+    return () => clearInterval(intervalId);
+  }, [url, interval]);
+
+  if (error) return <div>Error: {error.message}</div>;
+  return <div>{JSON.stringify(data)}</div>;
+}
+```
+
+### Timer Ref Pattern
+
+```tsx
+function DebouncedSearch({ onSearch }: { onSearch: (query: string) => void }) {
+  const [query, setQuery] = useState('');
+  const timeoutRef = useRef<number>();
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setQuery(value);
+
+    // Clear previous timeout
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+    }
+
+    // Set new timeout
+    timeoutRef.current = window.setTimeout(() => {
+      onSearch(value);
+    }, 300);
+  };
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+    };
+  }, []);
+
+  return <input value={query} onChange={handleChange} />;
+}
+```
+
+---
+
+## useTimeout Hook
+
+Reusable hook for delayed execution.
+
+```tsx
+import { useEffect, useRef, useCallback } from 'react';
+
+function useTimeout(callback: () => void, delay: number | null) {
+  const savedCallback = useRef(callback);
+
+  // Update ref when callback changes
+  useEffect(() => {
+    savedCallback.current = callback;
+  }, [callback]);
+
+  useEffect(() => {
+    if (delay === null) return;
+
+    const timeoutId = setTimeout(() => {
+      savedCallback.current();
+    }, delay);
+
+    return () => clearTimeout(timeoutId);
+  }, [delay]);
+}
+
+// Usage
+function Toast({ message, onClose }: Props) {
+  useTimeout(onClose, 3000);
+  return <div>{message}</div>;
+}
+```
+
+### useTimeout with Reset
+
+```tsx
+function useTimeoutWithReset(callback: () => void, delay: number) {
+  const savedCallback = useRef(callback);
+  const timeoutRef = useRef<number>();
+
+  useEffect(() => {
+    savedCallback.current = callback;
+  }, [callback]);
+
+  const reset = useCallback(() => {
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+    }
+    timeoutRef.current = window.setTimeout(() => {
+      savedCallback.current();
+    }, delay);
+  }, [delay]);
+
+  const clear = useCallback(() => {
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+    }
+  }, []);
+
+  useEffect(() => {
+    reset();
+    return clear;
+  }, [reset, clear]);
+
+  return { reset, clear };
+}
+
+// Usage
+function IdleDetector({ onIdle }: { onIdle: () => void }) {
+  const { reset } = useTimeoutWithReset(onIdle, 30000);
+
+  return (
+    <div onMouseMove={reset} onKeyDown={reset}>
+      Move mouse or press key to reset idle timer
+    </div>
+  );
+}
+```
+
+---
+
+## useInterval Hook
+
+Reusable hook for repeated execution.
+
+```tsx
+import { useEffect, useRef } from 'react';
+
+function useInterval(callback: () => void, delay: number | null) {
+  const savedCallback = useRef(callback);
+
+  useEffect(() => {
+    savedCallback.current = callback;
+  }, [callback]);
+
+  useEffect(() => {
+    if (delay === null) return;
+
+    const intervalId = setInterval(() => {
+      savedCallback.current();
+    }, delay);
+
+    return () => clearInterval(intervalId);
+  }, [delay]);
+}
+
+// Usage
+function Clock() {
+  const [time, setTime] = useState(new Date());
+
+  useInterval(() => {
+    setTime(new Date());
+  }, 1000);
+
+  return <div>{time.toLocaleTimeString()}</div>;
+}
+```
+
+### Dynamic Interval
+
+```tsx
+function SpeedingCounter() {
+  const [count, setCount] = useState(0);
+  const [delay, setDelay] = useState(1000);
+
+  useInterval(() => {
+    setCount(c => c + 1);
+    // Speed up over time
+    setDelay(d => Math.max(100, d - 50));
+  }, delay);
+
+  return <div>Count: {count} (delay: {delay}ms)</div>;
+}
+```
+
+### Pausable Interval
+
+```tsx
+function useIntervalPausable(callback: () => void, delay: number | null) {
+  const savedCallback = useRef(callback);
+  const [isRunning, setIsRunning] = useState(true);
+
+  useEffect(() => {
+    savedCallback.current = callback;
+  }, [callback]);
+
+  useEffect(() => {
+    if (delay === null || !isRunning) return;
+
+    const intervalId = setInterval(() => {
+      savedCallback.current();
+    }, delay);
+
+    return () => clearInterval(intervalId);
+  }, [delay, isRunning]);
+
+  return {
+    pause: () => setIsRunning(false),
+    resume: () => setIsRunning(true),
+    isRunning,
+  };
+}
+```
+
+---
+
+## Debounce Implementation
+
+Delay execution until input stops.
+
+```tsx
+import { useState, useEffect, useMemo } from 'react';
+
+function useDebounce<T>(value: T, delay: number): T {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      setDebouncedValue(value);
+    }, delay);
+
+    return () => clearTimeout(timeoutId);
+  }, [value, delay]);
+
+  return debouncedValue;
+}
+
+// Usage
+function SearchInput({ onSearch }: { onSearch: (query: string) => void }) {
+  const [query, setQuery] = useState('');
+  const debouncedQuery = useDebounce(query, 300);
+
+  useEffect(() => {
+    if (debouncedQuery) {
+      onSearch(debouncedQuery);
+    }
+  }, [debouncedQuery, onSearch]);
+
+  return (
+    <input
+      value={query}
+      onChange={e => setQuery(e.target.value)}
+      placeholder="Search..."
+    />
+  );
+}
+```
+
+### Debounced Callback
+
+```tsx
+import { useCallback, useRef } from 'react';
+
+function useDebouncedCallback<T extends (...args: Parameters<T>) => void>(
+  callback: T,
+  delay: number
+): T {
+  const timeoutRef = useRef<number>();
+  const callbackRef = useRef(callback);
+
+  useEffect(() => {
+    callbackRef.current = callback;
+  }, [callback]);
+
+  return useCallback(
+    ((...args: Parameters<T>) => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+      timeoutRef.current = window.setTimeout(() => {
+        callbackRef.current(...args);
+      }, delay);
+    }) as T,
+    [delay]
+  );
+}
+
+// Usage
+function AutoSave({ content }: { content: string }) {
+  const save = useDebouncedCallback((text: string) => {
+    fetch('/api/save', {
+      method: 'POST',
+      body: JSON.stringify({ content: text }),
+    });
+  }, 1000);
+
+  useEffect(() => {
+    save(content);
+  }, [content, save]);
+
+  return null;
+}
+```
+
+---
+
+## Throttle Implementation
+
+Limit execution to once per interval.
+
+```tsx
+import { useCallback, useRef } from 'react';
+
+function useThrottle<T>(value: T, interval: number): T {
+  const [throttledValue, setThrottledValue] = useState(value);
+  const lastExecuted = useRef(Date.now());
+
+  useEffect(() => {
+    const now = Date.now();
+    const timeSinceLastExecution = now - lastExecuted.current;
+
+    if (timeSinceLastExecution >= interval) {
+      lastExecuted.current = now;
+      setThrottledValue(value);
+    } else {
+      const timeoutId = setTimeout(() => {
+        lastExecuted.current = Date.now();
+        setThrottledValue(value);
+      }, interval - timeSinceLastExecution);
+
+      return () => clearTimeout(timeoutId);
+    }
+  }, [value, interval]);
+
+  return throttledValue;
+}
+
+// Usage
+function WindowScroll() {
+  const [scrollY, setScrollY] = useState(0);
+  const throttledScrollY = useThrottle(scrollY, 100);
+
+  useEffect(() => {
+    const handleScroll = () => setScrollY(window.scrollY);
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  return <div>Scroll position: {throttledScrollY}</div>;
+}
+```
+
+### Throttled Callback
+
+```tsx
+function useThrottledCallback<T extends (...args: Parameters<T>) => void>(
+  callback: T,
+  interval: number
+): T {
+  const lastExecuted = useRef(0);
+  const timeoutRef = useRef<number>();
+  const callbackRef = useRef(callback);
+
+  useEffect(() => {
+    callbackRef.current = callback;
+  }, [callback]);
+
+  useEffect(() => {
+    return () => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+    };
+  }, []);
+
+  return useCallback(
+    ((...args: Parameters<T>) => {
+      const now = Date.now();
+      const timeSinceLastExecution = now - lastExecuted.current;
+
+      if (timeSinceLastExecution >= interval) {
+        lastExecuted.current = now;
+        callbackRef.current(...args);
+      } else {
+        if (timeoutRef.current) {
+          clearTimeout(timeoutRef.current);
+        }
+        timeoutRef.current = window.setTimeout(() => {
+          lastExecuted.current = Date.now();
+          callbackRef.current(...args);
+        }, interval - timeSinceLastExecution);
+      }
+    }) as T,
+    [interval]
+  );
+}
+```
+
+### Debounce vs Throttle
+
+| Debounce | Throttle |
+|----------|----------|
+| Waits for pause in input | Executes at regular intervals |
+| Search input | Scroll events |
+| Form validation | Resize events |
+| Auto-save | Mouse move |
+| API calls after typing | Rate-limited APIs |
+
+---
+
+## requestAnimationFrame
+
+Smooth animations synced to display refresh rate.
+
+```tsx
+import { useEffect, useRef, useState } from 'react';
+
+function useAnimationFrame(callback: (deltaTime: number) => void) {
+  const requestRef = useRef<number>();
+  const previousTimeRef = useRef<number>();
+  const callbackRef = useRef(callback);
+
+  useEffect(() => {
+    callbackRef.current = callback;
+  }, [callback]);
+
+  useEffect(() => {
+    const animate = (time: number) => {
+      if (previousTimeRef.current !== undefined) {
+        const deltaTime = time - previousTimeRef.current;
+        callbackRef.current(deltaTime);
+      }
+      previousTimeRef.current = time;
+      requestRef.current = requestAnimationFrame(animate);
+    };
+
+    requestRef.current = requestAnimationFrame(animate);
+
+    return () => {
+      if (requestRef.current) {
+        cancelAnimationFrame(requestRef.current);
+      }
+    };
+  }, []);
+}
+
+// Usage
+function MovingBox() {
+  const [position, setPosition] = useState(0);
+
+  useAnimationFrame((deltaTime) => {
+    setPosition(prev => (prev + deltaTime * 0.1) % window.innerWidth);
+  });
+
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        left: position,
+        width: 50,
+        height: 50,
+        background: 'blue',
+      }}
+    />
+  );
+}
+```
+
+### Animation with Duration
+
+```tsx
+function useAnimation(duration: number) {
+  const [progress, setProgress] = useState(0);
+  const startTimeRef = useRef<number>();
+  const requestRef = useRef<number>();
+
+  useEffect(() => {
+    const animate = (timestamp: number) => {
+      if (!startTimeRef.current) {
+        startTimeRef.current = timestamp;
+      }
+
+      const elapsed = timestamp - startTimeRef.current;
+      const newProgress = Math.min(elapsed / duration, 1);
+
+      setProgress(newProgress);
+
+      if (newProgress < 1) {
+        requestRef.current = requestAnimationFrame(animate);
+      }
+    };
+
+    requestRef.current = requestAnimationFrame(animate);
+
+    return () => {
+      if (requestRef.current) {
+        cancelAnimationFrame(requestRef.current);
+      }
+    };
+  }, [duration]);
+
+  return progress;
+}
+
+// Usage
+function FadeIn({ children }: { children: React.ReactNode }) {
+  const progress = useAnimation(500);
+
+  return (
+    <div style={{ opacity: progress }}>
+      {children}
+    </div>
+  );
+}
+```
+
+### Spring Animation
+
+```tsx
+function useSpring(target: number, stiffness = 0.1, damping = 0.8) {
+  const [current, setCurrent] = useState(target);
+  const velocityRef = useRef(0);
+
+  useAnimationFrame(() => {
+    const displacement = target - current;
+    const springForce = displacement * stiffness;
+    velocityRef.current = velocityRef.current * damping + springForce;
+
+    if (Math.abs(velocityRef.current) > 0.01 || Math.abs(displacement) > 0.01) {
+      setCurrent(c => c + velocityRef.current);
+    }
+  });
+
+  return current;
+}
+
+// Usage
+function SpringBox({ targetX }: { targetX: number }) {
+  const x = useSpring(targetX);
+
+  return (
+    <div style={{ transform: `translateX(${x}px)` }}>
+      Spring animated
+    </div>
+  );
+}
+```
+
+<Callout type="info">
+requestAnimationFrame runs at 60fps (or higher on high-refresh displays). Use it for visual animations, not for timers.
+</Callout>
+
+---
+
+## Timer Pattern Comparison
+
+| Pattern | Use Case | Precision |
+|---------|----------|-----------|
+| setTimeout | Delayed one-time actions | Low |
+| setInterval | Repeated actions | Low |
+| requestAnimationFrame | Visual animations | High (60fps) |
+| Debounce | Wait for input pause | N/A |
+| Throttle | Rate limiting | Configurable |

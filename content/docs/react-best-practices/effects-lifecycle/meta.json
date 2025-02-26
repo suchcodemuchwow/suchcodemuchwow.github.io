@@ -1,0 +1,4 @@
+{
+  "title": "Effects & Lifecycle",
+  "pages": ["effect-patterns", "cleanup", "subscriptions", "timers"]
+}

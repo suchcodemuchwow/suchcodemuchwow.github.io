@@ -1,0 +1,260 @@
+---
+title: Local State Patterns
+description: When and how to use component-local state effectively
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## When State Should Be Local
+
+Keep state local when:
+
+- Only one component reads or writes it
+- It doesn't need to survive unmounting
+- It doesn't affect sibling components
+- It's purely presentational
+
+```tsx
+function Dropdown({ items }: { items: Item[] }) {
+  const [isOpen, setIsOpen] = useState(false);
+
+  return (
+    <div>
+      <button onClick={() => setIsOpen(!isOpen)}>Toggle</button>
+      {isOpen && <DropdownMenu items={items} />}
+    </div>
+  );
+}
+```
+
+<Callout type="info" title="Default to Local">
+Start with local state. Only lift or externalize when you have a concrete need.
+</Callout>
+
+---
+
+## UI State vs Domain State
+
+| Type | Description | Examples | Location |
+|------|-------------|----------|----------|
+| **UI State** | Visual/interaction state | Open/closed, hover, focus, scroll position | Local |
+| **Domain State** | Business data | User info, products, orders | Lifted or external |
+
+```tsx
+function ProductCard({ product }: { product: Product }) {
+  // UI state - local
+  const [isHovered, setIsHovered] = useState(false);
+  const [imageIndex, setImageIndex] = useState(0);
+
+  // Domain state comes from props (owned elsewhere)
+  const { name, price, images } = product;
+
+  return (
+    <article
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+    >
+      <img src={images[imageIndex]} alt={name} />
+      {isHovered && (
+        <ImageNavigation
+          count={images.length}
+          current={imageIndex}
+          onChange={setImageIndex}
+        />
+      )}
+      <h3>{name}</h3>
+      <p>{price}</p>
+    </article>
+  );
+}
+```
+
+---
+
+## Form State Locality
+
+### When to Keep Form State Local
+
+Forms are often best managed locally until submission:
+
+```tsx
+function ContactForm({ onSubmit }: { onSubmit: (data: ContactData) => void }) {
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [message, setMessage] = useState('');
+
+  const handleSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    onSubmit({ name, email, message });
+  };
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <input value={name} onChange={e => setName(e.target.value)} />
+      <input value={email} onChange={e => setEmail(e.target.value)} />
+      <textarea value={message} onChange={e => setMessage(e.target.value)} />
+      <button type="submit">Send</button>
+    </form>
+  );
+}
+```
+
+### When to Lift Form State
+
+| Lift When | Keep Local When |
+|-----------|-----------------|
+| Multi-step wizard | Single form |
+| Real-time collaboration | Standard submission |
+| Cross-component validation | Self-contained validation |
+| Undo/redo needed | Simple edit flow |
+
+```tsx
+// Multi-step: state lives in parent
+function CheckoutWizard() {
+  const [formData, setFormData] = useState<CheckoutData>({
+    shipping: null,
+    billing: null,
+    payment: null,
+  });
+
+  return (
+    <WizardProvider value={{ formData, setFormData }}>
+      <WizardSteps />
+    </WizardProvider>
+  );
+}
+```
+
+---
+
+## Transient vs Persistent State
+
+### Transient State
+
+Exists only while component is mounted. Lost on unmount.
+
+```tsx
+function SearchResults() {
+  // Transient - resets when navigating away
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+
+  return (/* ... */);
+}
+```
+
+### Persistent State
+
+Should survive across sessions or navigation.
+
+```tsx
+function SearchResults() {
+  // Persist to URL - survives navigation
+  const [searchParams, setSearchParams] = useSearchParams();
+  const sortOrder = searchParams.get('sort') ?? 'asc';
+
+  // Persist to localStorage - survives sessions
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>(() => {
+    return (localStorage.getItem('viewMode') as 'grid' | 'list') ?? 'grid';
+  });
+
+  useEffect(() => {
+    localStorage.setItem('viewMode', viewMode);
+  }, [viewMode]);
+
+  return (/* ... */);
+}
+```
+
+<Callout type="warn" title="Choose Wisely">
+Transient state causes frustration when users expect persistence. Persistent state bloats storage when users expect a fresh start.
+</Callout>
+
+---
+
+## Signs State Should Move
+
+### Move Up (Lift) When
+
+- Sibling components need the same data
+- Parent needs to coordinate children
+- State affects routing or navigation
+
+```tsx
+// Before: duplicated state
+function TabA() {
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+}
+function TabB() {
+  const [selectedId, setSelectedId] = useState<string | null>(null); // Same!
+}
+
+// After: lifted to parent
+function TabContainer() {
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  return (
+    <>
+      <TabA selectedId={selectedId} onSelect={setSelectedId} />
+      <TabB selectedId={selectedId} onSelect={setSelectedId} />
+    </>
+  );
+}
+```
+
+### Move to Context When
+
+- Deep prop drilling (3+ levels)
+- Many components need read access
+- Value changes infrequently
+
+### Move to External Store When
+
+- Complex async operations
+- Caching requirements
+- DevTools debugging needed
+- State shared across routes
+
+---
+
+## Checklist: Is Local State Right?
+
+| Question | Yes → Local | No → Consider |
+|----------|-------------|---------------|
+| Only this component uses it? | ✓ Local | Lift or context |
+| Can reset on unmount? | ✓ Local | Persist elsewhere |
+| UI-only (no business logic)? | ✓ Local | Domain store |
+| No sibling coordination? | ✓ Local | Lift to parent |
+| No deep prop drilling? | ✓ Local | Context |
+
+```tsx
+// Good local state example
+function Accordion({ sections }: { sections: Section[] }) {
+  // Local: only Accordion needs this, can reset, pure UI
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+
+  const toggle = (id: string) => {
+    setExpandedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  return (
+    <div>
+      {sections.map(section => (
+        <AccordionSection
+          key={section.id}
+          section={section}
+          isExpanded={expandedIds.has(section.id)}
+          onToggle={() => toggle(section.id)}
+        />
+      ))}
+    </div>
+  );
+}
+```

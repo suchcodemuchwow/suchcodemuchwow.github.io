@@ -1,0 +1,550 @@
+---
+title: Safe HTML Rendering
+description: Safely render HTML content in React applications
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## dangerouslySetInnerHTML
+
+React's `dangerouslySetInnerHTML` bypasses the virtual DOM and injects raw HTML directly. The name is intentionally alarming.
+
+```tsx
+function RawHtml({ html }: { html: string }) {
+  return <div dangerouslySetInnerHTML={{ __html: html }} />;
+}
+```
+
+### Pros and Cons
+
+| Pros | Cons |
+|------|------|
+| Renders any HTML structure | Direct XSS vulnerability |
+| Necessary for rich text editors | Bypasses React's escaping |
+| Required for some embeds | Performance impact (no virtual DOM diffing) |
+| Legacy HTML integration | Harder to maintain |
+
+---
+
+## When It's Necessary
+
+### Legitimate Use Cases
+
+| Use Case | Example |
+|----------|---------|
+| CMS content | Blog posts from headless CMS |
+| Rich text editors | WYSIWYG editor output |
+| Email templates | HTML email previews |
+| Legacy migration | Embedding existing HTML |
+| Syntax highlighting | Pre-rendered code blocks |
+
+### When NOT to Use
+
+| Scenario | Alternative |
+|----------|-------------|
+| User comments | Parse and render safe elements |
+| Form inputs | Use controlled components |
+| Dynamic text | Use JSX interpolation |
+| JSON data display | Use React components |
+
+<Callout type="warn">
+If you can solve the problem without `dangerouslySetInnerHTML`, do so.
+</Callout>
+
+---
+
+## Sanitization Approaches
+
+### Basic Sanitization Pattern
+
+```tsx
+type AllowedTag = 'p' | 'br' | 'strong' | 'em' | 'ul' | 'ol' | 'li' | 'a';
+type AllowedAttr = 'href' | 'title';
+
+interface SanitizeOptions {
+  allowedTags: AllowedTag[];
+  allowedAttributes: Record<string, AllowedAttr[]>;
+}
+
+function sanitizeHtml(html: string, options: SanitizeOptions): string {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(html, 'text/html');
+
+  function sanitizeNode(node: Node): Node | null {
+    if (node.nodeType === Node.TEXT_NODE) {
+      return node.cloneNode();
+    }
+
+    if (node.nodeType !== Node.ELEMENT_NODE) {
+      return null;
+    }
+
+    const element = node as Element;
+    const tagName = element.tagName.toLowerCase() as AllowedTag;
+
+    if (!options.allowedTags.includes(tagName)) {
+      // Return text content only for disallowed tags
+      return document.createTextNode(element.textContent || '');
+    }
+
+    const newElement = document.createElement(tagName);
+    const allowedAttrs = options.allowedAttributes[tagName] || [];
+
+    for (const attr of allowedAttrs) {
+      const value = element.getAttribute(attr);
+      if (value !== null) {
+        // Additional validation for href
+        if (attr === 'href' && !isValidUrl(value)) {
+          continue;
+        }
+        newElement.setAttribute(attr, value);
+      }
+    }
+
+    for (const child of Array.from(element.childNodes)) {
+      const sanitizedChild = sanitizeNode(child);
+      if (sanitizedChild) {
+        newElement.appendChild(sanitizedChild);
+      }
+    }
+
+    return newElement;
+  }
+
+  const result = document.createElement('div');
+  for (const child of Array.from(doc.body.childNodes)) {
+    const sanitized = sanitizeNode(child);
+    if (sanitized) {
+      result.appendChild(sanitized);
+    }
+  }
+
+  return result.innerHTML;
+}
+
+function isValidUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url, window.location.origin);
+    return ['http:', 'https:', 'mailto:'].includes(parsed.protocol);
+  } catch {
+    return false;
+  }
+}
+```
+
+### Usage
+
+```tsx
+function SafeHtml({ html }: { html: string }) {
+  const sanitized = sanitizeHtml(html, {
+    allowedTags: ['p', 'br', 'strong', 'em', 'a'],
+    allowedAttributes: {
+      a: ['href', 'title'],
+    },
+  });
+
+  return <div dangerouslySetInnerHTML={{ __html: sanitized }} />;
+}
+```
+
+---
+
+## DOMPurify-Style Patterns
+
+The concept behind sanitization libraries: parse HTML into a DOM tree, walk the tree removing dangerous elements and attributes, serialize back to string.
+
+### Key Sanitization Rules
+
+```tsx
+const DANGEROUS_TAGS = [
+  'script', 'iframe', 'object', 'embed', 'form',
+  'input', 'button', 'select', 'textarea',
+  'style', 'link', 'meta', 'base',
+] as const;
+
+const DANGEROUS_ATTRIBUTES = [
+  'onclick', 'onerror', 'onload', 'onmouseover',
+  'onfocus', 'onblur', 'onchange', 'onsubmit',
+  'formaction', 'action', 'xlink:href',
+] as const;
+
+const DANGEROUS_PROTOCOLS = [
+  'javascript:', 'data:', 'vbscript:',
+] as const;
+
+function isDangerousAttribute(name: string, value: string): boolean {
+  // Event handlers
+  if (name.startsWith('on')) return true;
+
+  // Dangerous attribute names
+  if (DANGEROUS_ATTRIBUTES.includes(name as typeof DANGEROUS_ATTRIBUTES[number])) {
+    return true;
+  }
+
+  // URL attributes with dangerous protocols
+  if (['href', 'src', 'action'].includes(name)) {
+    const normalizedValue = value.toLowerCase().trim();
+    return DANGEROUS_PROTOCOLS.some(p => normalizedValue.startsWith(p));
+  }
+
+  return false;
+}
+```
+
+### Recursive Sanitizer
+
+```tsx
+function deepSanitize(element: Element): void {
+  // Remove dangerous tags entirely
+  const dangerousChildren = Array.from(element.querySelectorAll(
+    DANGEROUS_TAGS.join(',')
+  ));
+  dangerousChildren.forEach(child => child.remove());
+
+  // Clean attributes from all remaining elements
+  const allElements = element.querySelectorAll('*');
+  allElements.forEach(el => {
+    const attrsToRemove: string[] = [];
+
+    for (const attr of Array.from(el.attributes)) {
+      if (isDangerousAttribute(attr.name, attr.value)) {
+        attrsToRemove.push(attr.name);
+      }
+    }
+
+    attrsToRemove.forEach(name => el.removeAttribute(name));
+  });
+}
+
+function createSanitizedHtml(dirty: string): string {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(dirty, 'text/html');
+  deepSanitize(doc.body);
+  return doc.body.innerHTML;
+}
+```
+
+<Callout type="info">
+For production applications with complex HTML requirements, consider using a well-tested sanitization library that handles edge cases and browser quirks.
+</Callout>
+
+---
+
+## Markdown Rendering Safely
+
+### Parse to AST, Render with React
+
+```tsx
+interface MarkdownNode {
+  type: 'text' | 'paragraph' | 'bold' | 'italic' | 'link' | 'code' | 'list' | 'listItem';
+  content?: string;
+  children?: MarkdownNode[];
+  href?: string;
+}
+
+function renderMarkdownNode(node: MarkdownNode, key: number): React.ReactNode {
+  switch (node.type) {
+    case 'text':
+      return node.content;
+
+    case 'paragraph':
+      return (
+        <p key={key}>
+          {node.children?.map((child, i) => renderMarkdownNode(child, i))}
+        </p>
+      );
+
+    case 'bold':
+      return (
+        <strong key={key}>
+          {node.children?.map((child, i) => renderMarkdownNode(child, i))}
+        </strong>
+      );
+
+    case 'italic':
+      return (
+        <em key={key}>
+          {node.children?.map((child, i) => renderMarkdownNode(child, i))}
+        </em>
+      );
+
+    case 'link':
+      const href = node.href || '';
+      const isSafe = /^https?:\/\//.test(href);
+      return isSafe ? (
+        <a key={key} href={href} rel="noopener noreferrer">
+          {node.children?.map((child, i) => renderMarkdownNode(child, i))}
+        </a>
+      ) : (
+        <span key={key}>
+          {node.children?.map((child, i) => renderMarkdownNode(child, i))}
+        </span>
+      );
+
+    case 'code':
+      return <code key={key}>{node.content}</code>;
+
+    case 'list':
+      return (
+        <ul key={key}>
+          {node.children?.map((child, i) => renderMarkdownNode(child, i))}
+        </ul>
+      );
+
+    case 'listItem':
+      return (
+        <li key={key}>
+          {node.children?.map((child, i) => renderMarkdownNode(child, i))}
+        </li>
+      );
+
+    default:
+      return null;
+  }
+}
+
+function SafeMarkdown({ ast }: { ast: MarkdownNode[] }) {
+  return (
+    <div>
+      {ast.map((node, i) => renderMarkdownNode(node, i))}
+    </div>
+  );
+}
+```
+
+### Why AST Rendering is Safe
+
+| Approach | XSS Risk | Control |
+|----------|----------|---------|
+| Parse to AST + React render | Low | Full control over output |
+| Markdown to HTML + innerHTML | High | Limited control |
+| Markdown to HTML + sanitize | Medium | Depends on sanitizer |
+
+---
+
+## User-Generated Content
+
+### Comment System Example
+
+```tsx
+interface Comment {
+  id: string;
+  author: string;
+  content: string;
+  timestamp: Date;
+}
+
+function CommentDisplay({ comment }: { comment: Comment }) {
+  // Content is rendered as text, not HTML
+  return (
+    <article className="comment">
+      <header>
+        <strong>{comment.author}</strong>
+        <time dateTime={comment.timestamp.toISOString()}>
+          {comment.timestamp.toLocaleDateString()}
+        </time>
+      </header>
+      <p>{comment.content}</p>
+    </article>
+  );
+}
+
+// With limited formatting support
+function FormattedComment({ content }: { content: string }) {
+  // Split by newlines, render each as paragraph
+  const paragraphs = content.split(/\n\n+/);
+
+  return (
+    <div>
+      {paragraphs.map((p, i) => (
+        <p key={i}>
+          {p.split('\n').map((line, j) => (
+            <React.Fragment key={j}>
+              {j > 0 && <br />}
+              {line}
+            </React.Fragment>
+          ))}
+        </p>
+      ))}
+    </div>
+  );
+}
+```
+
+### Rich User Content with Allowlist
+
+```tsx
+type SafeElement = {
+  tag: 'b' | 'i' | 'u' | 'a';
+  content: string;
+  href?: string;
+};
+
+function parseUserContent(raw: string): (string | SafeElement)[] {
+  const result: (string | SafeElement)[] = [];
+
+  // Simple pattern matching for [b]bold[/b], [i]italic[/i], [url=...]link[/url]
+  const regex = /\[b\](.*?)\[\/b\]|\[i\](.*?)\[\/i\]|\[url=(https?:\/\/[^\]]+)\](.*?)\[\/url\]/g;
+
+  let lastIndex = 0;
+  let match;
+
+  while ((match = regex.exec(raw)) !== null) {
+    if (match.index > lastIndex) {
+      result.push(raw.slice(lastIndex, match.index));
+    }
+
+    if (match[1] !== undefined) {
+      result.push({ tag: 'b', content: match[1] });
+    } else if (match[2] !== undefined) {
+      result.push({ tag: 'i', content: match[2] });
+    } else if (match[3] && match[4] !== undefined) {
+      result.push({ tag: 'a', content: match[4], href: match[3] });
+    }
+
+    lastIndex = regex.lastIndex;
+  }
+
+  if (lastIndex < raw.length) {
+    result.push(raw.slice(lastIndex));
+  }
+
+  return result;
+}
+
+function UserContent({ content }: { content: string }) {
+  const parsed = parseUserContent(content);
+
+  return (
+    <span>
+      {parsed.map((item, i) => {
+        if (typeof item === 'string') {
+          return <React.Fragment key={i}>{item}</React.Fragment>;
+        }
+
+        switch (item.tag) {
+          case 'b':
+            return <strong key={i}>{item.content}</strong>;
+          case 'i':
+            return <em key={i}>{item.content}</em>;
+          case 'a':
+            return (
+              <a key={i} href={item.href} rel="noopener noreferrer">
+                {item.content}
+              </a>
+            );
+          default:
+            return <span key={i}>{item.content}</span>;
+        }
+      })}
+    </span>
+  );
+}
+```
+
+---
+
+## Alternatives to innerHTML
+
+### Component-Based Rendering
+
+```tsx
+// Instead of: <div dangerouslySetInnerHTML={{__html: '<b>Bold</b>'}} />
+
+// Use:
+function StyledText({ bold, text }: { bold?: boolean; text: string }) {
+  return bold ? <strong>{text}</strong> : <span>{text}</span>;
+}
+```
+
+### Dynamic Element Creation
+
+```tsx
+type ElementConfig = {
+  tag: keyof JSX.IntrinsicElements;
+  props?: Record<string, string>;
+  children?: (ElementConfig | string)[];
+};
+
+function DynamicElement({ config }: { config: ElementConfig }) {
+  const { tag, props = {}, children = [] } = config;
+  const Tag = tag;
+
+  return (
+    <Tag {...props}>
+      {children.map((child, i) =>
+        typeof child === 'string' ? (
+          child
+        ) : (
+          <DynamicElement key={i} config={child} />
+        )
+      )}
+    </Tag>
+  );
+}
+
+// Usage
+const config: ElementConfig = {
+  tag: 'article',
+  children: [
+    { tag: 'h1', children: ['Title'] },
+    { tag: 'p', children: ['First paragraph with ', { tag: 'strong', children: ['bold'] }, ' text.'] },
+  ],
+};
+
+<DynamicElement config={config} />
+```
+
+### Template Rendering
+
+```tsx
+interface TemplateVariables {
+  [key: string]: string;
+}
+
+function renderTemplate(template: string, variables: TemplateVariables): React.ReactNode[] {
+  const parts = template.split(/(\{\{[^}]+\}\})/);
+
+  return parts.map((part, i) => {
+    const match = part.match(/\{\{([^}]+)\}\}/);
+    if (match) {
+      const varName = match[1].trim();
+      // Variables are rendered as text, not HTML
+      return <span key={i}>{variables[varName] || ''}</span>;
+    }
+    return <React.Fragment key={i}>{part}</React.Fragment>;
+  });
+}
+
+function TemplateRenderer({
+  template,
+  variables
+}: {
+  template: string;
+  variables: TemplateVariables;
+}) {
+  return <div>{renderTemplate(template, variables)}</div>;
+}
+
+// Usage
+<TemplateRenderer
+  template="Hello {{name}}, welcome to {{site}}!"
+  variables={{ name: 'User', site: 'Our App' }}
+/>
+```
+
+---
+
+## Summary
+
+| Approach | Safety | Flexibility | Use When |
+|----------|--------|-------------|----------|
+| JSX interpolation | High | Low | Plain text |
+| Component rendering | High | Medium | Known structures |
+| AST + React render | High | High | Markdown, parsed formats |
+| Sanitized innerHTML | Medium | High | Trusted HTML sources |
+| Raw innerHTML | Low | High | Never with user input |
+
+<Callout type="info">
+Default to React's JSX interpolation. Only reach for `dangerouslySetInnerHTML` when absolutely necessary, and always sanitize.
+</Callout>

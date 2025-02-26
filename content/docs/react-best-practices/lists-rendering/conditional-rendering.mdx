@@ -1,0 +1,430 @@
+---
+title: Conditional Rendering
+description: Patterns for conditionally rendering content in React
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## if/else Patterns
+
+### Early Return
+
+The clearest pattern for mutually exclusive conditions:
+
+```tsx
+function UserStatus({ user }: { user: User | null }) {
+  if (!user) {
+    return <LoginPrompt />;
+  }
+
+  if (user.isBlocked) {
+    return <BlockedMessage />;
+  }
+
+  if (!user.isVerified) {
+    return <VerificationRequired user={user} />;
+  }
+
+  return <UserDashboard user={user} />;
+}
+```
+
+### Guard Clauses
+
+Handle edge cases first:
+
+```tsx
+function ProductDetails({ product, isLoading, error }: Props) {
+  if (isLoading) {
+    return <Skeleton />;
+  }
+
+  if (error) {
+    return <ErrorMessage error={error} />;
+  }
+
+  if (!product) {
+    return <NotFound />;
+  }
+
+  // Main render logic with guaranteed product
+  return (
+    <div>
+      <h1>{product.name}</h1>
+      <p>{product.description}</p>
+    </div>
+  );
+}
+```
+
+<Callout type="info" title="Type Narrowing">
+Early returns with null checks narrow TypeScript types automatically. After `if (!product) return`, TypeScript knows `product` is defined.
+</Callout>
+
+---
+
+## Ternary Operator
+
+Best for simple binary conditions inline:
+
+```tsx
+function Greeting({ isLoggedIn }: { isLoggedIn: boolean }) {
+  return (
+    <header>
+      {isLoggedIn ? <UserMenu /> : <LoginButton />}
+    </header>
+  );
+}
+```
+
+### Nested Ternaries
+
+Avoid deeply nested ternaries:
+
+```tsx
+// Bad: hard to read
+function Status({ status }: { status: string }) {
+  return (
+    <span>
+      {status === 'loading'
+        ? 'Loading...'
+        : status === 'error'
+          ? 'Error!'
+          : status === 'success'
+            ? 'Done!'
+            : 'Unknown'}
+    </span>
+  );
+}
+
+// Better: use early returns or object lookup
+function Status({ status }: { status: string }) {
+  const messages: Record<string, string> = {
+    loading: 'Loading...',
+    error: 'Error!',
+    success: 'Done!',
+  };
+
+  return <span>{messages[status] ?? 'Unknown'}</span>;
+}
+```
+
+---
+
+## && Operator
+
+Renders the right side only when left side is truthy:
+
+```tsx
+function Notifications({ count }: { count: number }) {
+  return (
+    <div>
+      {count > 0 && <Badge count={count} />}
+    </div>
+  );
+}
+```
+
+### The Zero Gotcha
+
+The `&&` operator returns the left operand if falsy, which can render `0`:
+
+```tsx
+// Bug: renders "0" when count is 0
+function MessageCount({ count }: { count: number }) {
+  return <div>{count && <span>{count} messages</span>}</div>;
+}
+
+// Fix 1: explicit boolean
+function MessageCount({ count }: { count: number }) {
+  return <div>{count > 0 && <span>{count} messages</span>}</div>;
+}
+
+// Fix 2: use ternary
+function MessageCount({ count }: { count: number }) {
+  return <div>{count ? <span>{count} messages</span> : null}</div>;
+}
+
+// Fix 3: double negation (converts to boolean)
+function MessageCount({ count }: { count: number }) {
+  return <div>{!!count && <span>{count} messages</span>}</div>;
+}
+```
+
+<Callout type="error" title="Common Bug">
+`{count && <Component />}` renders the number `0` when count is 0. Always use explicit comparisons: `{count > 0 && <Component />}`.
+</Callout>
+
+### Other Falsy Value Gotchas
+
+| Value | `value && <X />` renders |
+|-------|--------------------------|
+| `false` | nothing |
+| `null` | nothing |
+| `undefined` | nothing |
+| `0` | `0` (bug!) |
+| `''` | nothing |
+| `NaN` | `NaN` (bug!) |
+
+---
+
+## Early Returns
+
+Preferred pattern for complex conditional logic:
+
+```tsx
+function OrderSummary({ order }: { order: Order | null }) {
+  // Handle missing data
+  if (!order) {
+    return null;
+  }
+
+  // Handle empty order
+  if (order.items.length === 0) {
+    return <EmptyCart />;
+  }
+
+  // Handle pending payment
+  if (order.status === 'pending_payment') {
+    return <PaymentRequired order={order} />;
+  }
+
+  // Main case
+  return (
+    <div>
+      <OrderHeader order={order} />
+      <OrderItems items={order.items} />
+      <OrderTotal total={order.total} />
+    </div>
+  );
+}
+```
+
+### Benefits of Early Returns
+
+| Aspect | Early Returns | Nested Conditionals |
+|--------|---------------|---------------------|
+| Readability | Clear flow | Deeply nested |
+| Type narrowing | Automatic | Manual assertions |
+| Adding cases | Append new check | Find nesting point |
+| Testing | One path per return | Complex paths |
+
+---
+
+## Switch/Case Patterns
+
+### Direct Switch
+
+```tsx
+type Status = 'idle' | 'loading' | 'success' | 'error';
+
+function StatusIndicator({ status }: { status: Status }) {
+  switch (status) {
+    case 'idle':
+      return <IdleIcon />;
+    case 'loading':
+      return <Spinner />;
+    case 'success':
+      return <CheckIcon />;
+    case 'error':
+      return <ErrorIcon />;
+  }
+}
+```
+
+### Exhaustive Check
+
+Ensure all cases are handled:
+
+```tsx
+function assertNever(value: never): never {
+  throw new Error(`Unhandled value: ${value}`);
+}
+
+function StatusIndicator({ status }: { status: Status }) {
+  switch (status) {
+    case 'idle':
+      return <IdleIcon />;
+    case 'loading':
+      return <Spinner />;
+    case 'success':
+      return <CheckIcon />;
+    case 'error':
+      return <ErrorIcon />;
+    default:
+      return assertNever(status);  // TypeScript error if case missing
+  }
+}
+```
+
+### IIFE for Inline Switch
+
+```tsx
+function Card({ variant }: { variant: 'primary' | 'secondary' | 'danger' }) {
+  return (
+    <div className={(() => {
+      switch (variant) {
+        case 'primary': return 'bg-blue';
+        case 'secondary': return 'bg-gray';
+        case 'danger': return 'bg-red';
+      }
+    })()}>
+      Content
+    </div>
+  );
+}
+```
+
+---
+
+## Object Lookup Pattern
+
+Replace conditionals with object mapping:
+
+```tsx
+// Instead of switch
+const statusIcons: Record<Status, ReactNode> = {
+  idle: <IdleIcon />,
+  loading: <Spinner />,
+  success: <CheckIcon />,
+  error: <ErrorIcon />,
+};
+
+function StatusIndicator({ status }: { status: Status }) {
+  return <>{statusIcons[status]}</>;
+}
+```
+
+### With Components
+
+```tsx
+type AlertType = 'info' | 'warning' | 'error' | 'success';
+
+interface AlertConfig {
+  icon: ReactNode;
+  className: string;
+}
+
+const alertConfigs: Record<AlertType, AlertConfig> = {
+  info: { icon: <InfoIcon />, className: 'alert-info' },
+  warning: { icon: <WarningIcon />, className: 'alert-warning' },
+  error: { icon: <ErrorIcon />, className: 'alert-error' },
+  success: { icon: <SuccessIcon />, className: 'alert-success' },
+};
+
+function Alert({ type, children }: { type: AlertType; children: ReactNode }) {
+  const config = alertConfigs[type];
+
+  return (
+    <div className={config.className}>
+      {config.icon}
+      {children}
+    </div>
+  );
+}
+```
+
+### Dynamic Component Selection
+
+```tsx
+type ViewMode = 'grid' | 'list' | 'table';
+
+const viewComponents: Record<ViewMode, ComponentType<{ items: Item[] }>> = {
+  grid: GridView,
+  list: ListView,
+  table: TableView,
+};
+
+function ItemDisplay({ mode, items }: { mode: ViewMode; items: Item[] }) {
+  const ViewComponent = viewComponents[mode];
+  return <ViewComponent items={items} />;
+}
+```
+
+<Callout type="info" title="When to Use Object Lookup">
+Object lookup is ideal when mapping discrete values to outputs. It's more maintainable than switch for many cases and easier to extend.
+</Callout>
+
+---
+
+## Null vs Undefined vs False
+
+These all render nothing:
+
+```tsx
+function Examples() {
+  return (
+    <div>
+      {null}       {/* renders nothing */}
+      {undefined}  {/* renders nothing */}
+      {false}      {/* renders nothing */}
+      {true}       {/* renders nothing */}
+    </div>
+  );
+}
+```
+
+### Intentional No-Render
+
+```tsx
+// Return null for intentional "render nothing"
+function MaybeTooltip({ show, text }: Props) {
+  if (!show) {
+    return null;  // Explicit: intentionally renders nothing
+  }
+
+  return <Tooltip>{text}</Tooltip>;
+}
+```
+
+### Conditional Props vs Conditional Rendering
+
+```tsx
+// Conditional rendering: component not in tree
+{isAdmin && <AdminPanel />}
+
+// Conditional prop: component always in tree
+<AdminPanel hidden={!isAdmin} />
+```
+
+| Approach | Component in DOM | State Preserved | Use When |
+|----------|------------------|-----------------|----------|
+| Conditional render | No | No | Toggle visibility, save resources |
+| CSS hidden | Yes | Yes | Quick show/hide, preserve state |
+
+---
+
+## Pattern Comparison
+
+| Pattern | Best For | Avoid When |
+|---------|----------|------------|
+| Early return | Multiple exclusive conditions | Simple binary |
+| Ternary | Simple binary inline | Nested conditions |
+| `&&` | Optional rendering | Could be 0/NaN |
+| Switch | Many discrete cases | Two cases |
+| Object lookup | Mapping values to output | Dynamic conditions |
+| if/else | Complex logic | Simple inline |
+
+---
+
+## Common Patterns Summary
+
+```tsx
+// Show/hide
+{isVisible && <Modal />}
+
+// Either/or
+{isLoggedIn ? <Profile /> : <Login />}
+
+// Multiple states
+if (isLoading) return <Loading />;
+if (error) return <Error />;
+return <Content />;
+
+// Discrete values
+const icons = { success: <Check />, error: <X /> };
+return icons[status];
+
+// Null for nothing
+if (!data) return null;
+```

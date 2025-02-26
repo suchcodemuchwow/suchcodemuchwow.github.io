@@ -1,0 +1,451 @@
+---
+title: Module Boundaries
+description: Defining clear boundaries between modules in React applications
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## Public API Exports
+
+Each feature module should expose a clear public API through an index file.
+
+### Feature Module Structure
+
+```
+src/features/users/
+├── components/
+│   ├── UserList.tsx
+│   ├── UserCard.tsx
+│   └── UserAvatar.tsx      # Internal only
+├── hooks/
+│   ├── useUsers.ts
+│   └── useUserValidation.ts  # Internal only
+├── services/
+│   └── userService.ts
+├── types.ts
+└── index.ts                  # Public API
+```
+
+### Public API (index.ts)
+
+```tsx
+// Only export what other modules need
+export { UserList } from './components/UserList';
+export { UserCard } from './components/UserCard';
+export { useUsers } from './hooks/useUsers';
+export type { User, UserRole } from './types';
+
+// NOT exported: UserAvatar, useUserValidation, userService
+// These are internal implementation details
+```
+
+### Consumer Usage
+
+```tsx
+// Good: Import from public API
+import { UserList, useUsers, type User } from '@/features/users';
+
+// Bad: Reaching into internals
+import { UserAvatar } from '@/features/users/components/UserAvatar';
+import { userService } from '@/features/users/services/userService';
+```
+
+<Callout type="info" title="Principle">
+The index file is a contract. Anything not exported is an implementation detail that can change without notice.
+</Callout>
+
+---
+
+## Internal Modules
+
+### Marking Code as Internal
+
+```tsx
+// features/users/components/UserAvatar.tsx
+// This component is only used within the users feature
+
+/** @internal */
+export function UserAvatar({ user }: { user: User }) {
+  return <img src={user.avatar} alt={user.name} />;
+}
+```
+
+### Internal Folder Pattern
+
+For larger features, use an `internal` folder:
+
+```
+src/features/checkout/
+├── internal/
+│   ├── calculateTax.ts
+│   ├── validateAddress.ts
+│   └── CheckoutProgress.tsx
+├── components/
+│   └── CheckoutForm.tsx
+├── hooks/
+│   └── useCheckout.ts
+└── index.ts
+```
+
+### ESLint Enforcement
+
+Use `eslint-plugin-import` to enforce boundaries:
+
+```tsx
+// .eslintrc.js
+module.exports = {
+  rules: {
+    'import/no-internal-modules': [
+      'error',
+      {
+        forbid: ['**/features/*/internal/**'],
+      },
+    ],
+  },
+};
+```
+
+---
+
+## Circular Dependency Prevention
+
+### The Problem
+
+```tsx
+// features/users/hooks/useUsers.ts
+import { useAuth } from '@/features/auth';  // users → auth
+
+// features/auth/hooks/useAuth.ts
+import { useUsers } from '@/features/users'; // auth → users (circular!)
+```
+
+### Solution 1: Extract Shared Code
+
+```
+src/shared/hooks/
+└── useCurrentUser.ts    # Shared between auth and users
+```
+
+```tsx
+// features/auth/hooks/useAuth.ts
+import { useCurrentUser } from '@/shared/hooks/useCurrentUser';
+
+// features/users/hooks/useUsers.ts
+import { useCurrentUser } from '@/shared/hooks/useCurrentUser';
+```
+
+### Solution 2: Dependency Injection
+
+```tsx
+// features/users/hooks/useUsers.ts
+interface UseUsersOptions {
+  getCurrentUserId: () => string | null;
+}
+
+export function useUsers({ getCurrentUserId }: UseUsersOptions) {
+  const currentUserId = getCurrentUserId();
+  // ...
+}
+
+// Usage in app
+const { user } = useAuth();
+const users = useUsers({ getCurrentUserId: () => user?.id ?? null });
+```
+
+### Solution 3: Event-Based Communication
+
+```tsx
+// shared/events/userEvents.ts
+export const userEvents = {
+  onUserUpdated: new EventEmitter<User>(),
+  onUserDeleted: new EventEmitter<string>(),
+};
+
+// features/users - publishes
+userEvents.onUserUpdated.emit(updatedUser);
+
+// features/notifications - subscribes
+useEffect(() => {
+  return userEvents.onUserUpdated.subscribe(user => {
+    showNotification(`${user.name} was updated`);
+  });
+}, []);
+```
+
+### Detection Tools
+
+```bash
+# Using madge to detect circular dependencies
+npx madge --circular src/
+
+# Or with Vite plugin
+npm install -D vite-plugin-circular-dependency
+```
+
+```tsx
+// vite.config.ts
+import { defineConfig } from 'vite';
+import circularDependency from 'vite-plugin-circular-dependency';
+
+export default defineConfig({
+  plugins: [
+    circularDependency({
+      failOnError: true,
+    }),
+  ],
+});
+```
+
+---
+
+## Feature Modules
+
+### Module Structure
+
+Each feature is a self-contained module:
+
+```
+src/features/orders/
+├── components/          # Feature UI
+│   ├── OrderList.tsx
+│   ├── OrderDetails.tsx
+│   └── OrderForm.tsx
+├── hooks/              # Feature logic
+│   ├── useOrders.ts
+│   └── useOrderActions.ts
+├── services/           # API calls
+│   └── orderService.ts
+├── types.ts            # Feature types
+├── constants.ts        # Feature constants
+└── index.ts            # Public API
+```
+
+### Module Independence Rules
+
+| Rule | Description |
+|------|-------------|
+| Self-contained | Feature has everything it needs |
+| Import from shared | Can use `@/shared/*` |
+| Import from other features | Only through their public API |
+| No reaching in | Never import internal files from other features |
+| One-way dependencies | Lower features don't depend on higher ones |
+
+### Dependency Hierarchy
+
+```
+         App Layer (pages, routing)
+              ↓ depends on
+        Feature Modules (auth, users, orders)
+              ↓ depends on
+        Shared Layer (components, hooks, utils)
+              ↓ depends on
+        Core Layer (types, constants, config)
+```
+
+<Callout type="warn" title="Rule">
+Dependencies flow downward. A feature should never import from the app layer, and shared should never import from features.
+</Callout>
+
+---
+
+## Shared Modules
+
+### What Goes in Shared
+
+```
+src/shared/
+├── components/         # Reusable UI components
+│   ├── Button/
+│   ├── Modal/
+│   ├── Card/
+│   └── Form/
+├── hooks/             # Reusable hooks
+│   ├── useDebounce.ts
+│   ├── useLocalStorage.ts
+│   └── useMediaQuery.ts
+├── utils/             # Pure functions
+│   ├── formatDate.ts
+│   ├── formatCurrency.ts
+│   └── cn.ts
+├── types/             # Shared types
+│   └── common.ts
+└── constants/         # App constants
+    └── routes.ts
+```
+
+### Shared Module Rules
+
+| Include | Exclude |
+|---------|---------|
+| Generic, reusable code | Business logic |
+| UI primitives (Button, Input) | Feature-specific components |
+| Utility functions | API calls |
+| Common types | Feature types |
+| No feature dependencies | Feature-specific hooks |
+
+### Example: Shared Component
+
+```tsx
+// shared/components/Button/Button.tsx
+interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
+  variant?: 'primary' | 'secondary' | 'ghost';
+  size?: 'sm' | 'md' | 'lg';
+  isLoading?: boolean;
+}
+
+export function Button({
+  variant = 'primary',
+  size = 'md',
+  isLoading,
+  children,
+  disabled,
+  ...props
+}: ButtonProps) {
+  return (
+    <button
+      className={cn(buttonVariants({ variant, size }))}
+      disabled={disabled || isLoading}
+      {...props}
+    >
+      {isLoading ? <Spinner /> : children}
+    </button>
+  );
+}
+```
+
+---
+
+## Dependency Direction
+
+### Allowed Dependencies
+
+```tsx
+// App layer can import anything
+import { UserList } from '@/features/users';
+import { Button } from '@/shared/components';
+import { ROUTES } from '@/shared/constants';
+
+// Features can import from shared and other feature public APIs
+import { Button } from '@/shared/components';
+import { useAuth } from '@/features/auth';  // Public API only
+
+// Shared cannot import from features
+// ❌ import { User } from '@/features/users';  // NOT allowed
+```
+
+### Enforcing with TypeScript
+
+```json
+// tsconfig.json - Using project references
+{
+  "compilerOptions": {
+    "paths": {
+      "@/features/*": ["src/features/*"],
+      "@/shared/*": ["src/shared/*"]
+    }
+  }
+}
+```
+
+### Enforcing with ESLint
+
+```tsx
+// .eslintrc.js
+module.exports = {
+  rules: {
+    'import/no-restricted-paths': [
+      'error',
+      {
+        zones: [
+          // Shared cannot import from features
+          {
+            target: './src/shared',
+            from: './src/features',
+            message: 'Shared modules cannot import from features',
+          },
+          // Features cannot reach into other feature internals
+          {
+            target: './src/features',
+            from: './src/features/*/internal',
+            except: ['./internal'],
+            message: 'Cannot import internal modules from other features',
+          },
+        ],
+      },
+    ],
+  },
+};
+```
+
+---
+
+## Barrel Files: Pros and Cons
+
+### Pros
+
+| Benefit | Example |
+|---------|---------|
+| Clean imports | `import { Button, Modal } from '@/shared/components'` |
+| Encapsulation | Hide internal structure |
+| Refactoring | Move files without changing imports |
+| Discoverability | One place to see public API |
+
+### Cons
+
+| Issue | Description |
+|-------|-------------|
+| Bundle size | May import more than needed |
+| Circular deps | Easier to create circular imports |
+| Build performance | Slower in large projects |
+| Tree shaking | Can prevent effective tree shaking |
+
+### Best Practices
+
+```tsx
+// Good: Re-export specific items
+export { Button } from './Button';
+export { Modal } from './Modal';
+export type { ButtonProps } from './Button';
+
+// Avoid: Wildcard re-exports
+export * from './Button';  // Imports everything, hurts tree shaking
+```
+
+### Vite Optimization
+
+```tsx
+// vite.config.ts
+export default defineConfig({
+  optimizeDeps: {
+    include: ['react', 'react-dom'],
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          // Split vendor chunks
+          vendor: ['react', 'react-dom'],
+        },
+      },
+    },
+  },
+});
+```
+
+<Callout type="info" title="Recommendation">
+Use barrel files for feature public APIs and shared component libraries. Avoid deep barrel file nesting (barrels importing from barrels). For maximum tree shaking, consider direct imports in performance-critical paths.
+</Callout>
+
+---
+
+## Module Boundary Checklist
+
+When creating a new feature module:
+
+- [ ] Create `index.ts` with explicit exports
+- [ ] Only export what consumers need
+- [ ] Keep internal utilities unexported
+- [ ] Check for circular dependencies
+- [ ] Ensure dependencies flow downward
+- [ ] Add to ESLint boundary rules if needed
+- [ ] Document public API if complex

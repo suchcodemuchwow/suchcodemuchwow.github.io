@@ -1,0 +1,523 @@
+---
+title: Error Recovery
+description: Strategies for recovering from errors in React applications
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## Recovery Overview
+
+Error recovery enables users to continue using your application after an error occurs. Good recovery patterns minimize disruption and provide clear paths forward.
+
+---
+
+## Retry Mechanisms
+
+### Simple Retry Button
+
+```tsx
+interface FallbackProps {
+  error: Error;
+  resetErrorBoundary: () => void;
+}
+
+function ErrorFallback({ error, resetErrorBoundary }: FallbackProps) {
+  return (
+    <div role="alert">
+      <h2>Something went wrong</h2>
+      <pre>{error.message}</pre>
+      <button onClick={resetErrorBoundary}>Try again</button>
+    </div>
+  );
+}
+```
+
+### Automatic Retry with Limit
+
+```tsx
+interface Props {
+  children: ReactNode;
+  maxRetries?: number;
+  onExhausted?: (error: Error) => void;
+}
+
+interface State {
+  hasError: boolean;
+  error: Error | null;
+  retryCount: number;
+}
+
+class RetryBoundary extends Component<Props, State> {
+  static defaultProps = { maxRetries: 3 };
+
+  state: State = { hasError: false, error: null, retryCount: 0 };
+
+  static getDerivedStateFromError(error: Error): Partial<State> {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: ErrorInfo): void {
+    const { maxRetries, onExhausted } = this.props;
+    const { retryCount } = this.state;
+
+    if (retryCount >= (maxRetries ?? 3)) {
+      onExhausted?.(error);
+    }
+  }
+
+  retry = (): void => {
+    this.setState(prev => ({
+      hasError: false,
+      error: null,
+      retryCount: prev.retryCount + 1,
+    }));
+  };
+
+  render(): ReactNode {
+    const { hasError, error, retryCount } = this.state;
+    const { children, maxRetries = 3 } = this.props;
+
+    if (hasError && error) {
+      if (retryCount >= maxRetries) {
+        return (
+          <div>
+            <p>Failed after {maxRetries} attempts</p>
+            <p>{error.message}</p>
+          </div>
+        );
+      }
+
+      return (
+        <div>
+          <p>Error occurred (attempt {retryCount + 1}/{maxRetries})</p>
+          <button onClick={this.retry}>Retry</button>
+        </div>
+      );
+    }
+
+    return children;
+  }
+}
+```
+
+---
+
+## Reset Error Boundary State
+
+### Using Key Prop
+
+The simplest reset mechanism - change the key to remount:
+
+```tsx
+function UserProfile({ userId }: { userId: string }) {
+  return (
+    <ErrorBoundary key={userId}>
+      <ProfileContent userId={userId} />
+    </ErrorBoundary>
+  );
+}
+```
+
+<Callout type="info" title="How Key Reset Works">
+Changing a component's key tells React to unmount and remount it. This creates a fresh error boundary instance with clean state.
+</Callout>
+
+### Reset Keys Pattern
+
+Watch multiple values for changes:
+
+```tsx
+interface Props {
+  children: ReactNode;
+  resetKeys: unknown[];
+  onResetKeysChange?: (
+    prevKeys: unknown[],
+    nextKeys: unknown[]
+  ) => void;
+}
+
+class ErrorBoundary extends Component<Props, State> {
+  componentDidUpdate(prevProps: Props): void {
+    if (this.state.hasError && this.hasResetKeysChanged(prevProps)) {
+      this.props.onResetKeysChange?.(
+        prevProps.resetKeys,
+        this.props.resetKeys
+      );
+      this.reset();
+    }
+  }
+
+  hasResetKeysChanged(prevProps: Props): boolean {
+    return prevProps.resetKeys.some(
+      (key, index) => key !== this.props.resetKeys[index]
+    );
+  }
+
+  reset(): void {
+    this.setState({ hasError: false, error: null });
+  }
+
+  // ... rest of implementation
+}
+
+// Usage
+function SearchResults({ query, filters }: Props) {
+  return (
+    <ErrorBoundary resetKeys={[query, filters]}>
+      <Results query={query} filters={filters} />
+    </ErrorBoundary>
+  );
+}
+```
+
+---
+
+## User-Initiated Recovery
+
+### Multiple Recovery Options
+
+```tsx
+interface RecoveryFallbackProps {
+  error: Error;
+  resetErrorBoundary: () => void;
+}
+
+function RecoveryFallback({
+  error,
+  resetErrorBoundary,
+}: RecoveryFallbackProps) {
+  const navigate = useNavigate();
+
+  return (
+    <div className="error-recovery">
+      <h2>Unable to load content</h2>
+      <p>{error.message}</p>
+
+      <div className="recovery-options">
+        <button onClick={resetErrorBoundary}>
+          Try again
+        </button>
+
+        <button onClick={() => window.location.reload()}>
+          Reload page
+        </button>
+
+        <button onClick={() => navigate('/')}>
+          Go to home
+        </button>
+
+        <button onClick={() => navigate(-1)}>
+          Go back
+        </button>
+      </div>
+    </div>
+  );
+}
+```
+
+### Context-Aware Recovery
+
+```tsx
+function SmartErrorFallback({ error, resetErrorBoundary }: FallbackProps) {
+  const isNetworkError = error.message.includes('fetch');
+  const isAuthError = error.message.includes('401');
+
+  if (isAuthError) {
+    return (
+      <div>
+        <p>Your session has expired</p>
+        <button onClick={() => window.location.href = '/login'}>
+          Sign in again
+        </button>
+      </div>
+    );
+  }
+
+  if (isNetworkError) {
+    return (
+      <div>
+        <p>Network connection issue</p>
+        <button onClick={resetErrorBoundary}>
+          Retry connection
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <p>Something went wrong</p>
+      <button onClick={resetErrorBoundary}>Try again</button>
+    </div>
+  );
+}
+```
+
+---
+
+## Fallback to Degraded State
+
+When full recovery isn't possible, show reduced functionality:
+
+### Degraded Component Pattern
+
+```tsx
+interface Props {
+  children: ReactNode;
+  degradedFallback: ReactNode;
+}
+
+interface State {
+  hasError: boolean;
+  degraded: boolean;
+}
+
+class GracefulDegradation extends Component<Props, State> {
+  state: State = { hasError: false, degraded: false };
+
+  static getDerivedStateFromError(): Partial<State> {
+    return { hasError: true, degraded: true };
+  }
+
+  render(): ReactNode {
+    if (this.state.hasError) {
+      return this.props.degradedFallback;
+    }
+    return this.props.children;
+  }
+}
+
+// Usage
+function Dashboard() {
+  return (
+    <div>
+      <GracefulDegradation
+        degradedFallback={<StaticChart data={cachedData} />}
+      >
+        <LiveChart />
+      </GracefulDegradation>
+
+      <GracefulDegradation
+        degradedFallback={<span>Notifications unavailable</span>}
+      >
+        <NotificationBell />
+      </GracefulDegradation>
+    </div>
+  );
+}
+```
+
+### Feature Flags for Degradation
+
+```tsx
+function FeatureWithFallback({ feature, fallback, children }: Props) {
+  const [failed, setFailed] = useState(false);
+
+  if (failed) {
+    return <>{fallback}</>;
+  }
+
+  return (
+    <ErrorBoundary
+      fallbackRender={({ error }) => {
+        setFailed(true);
+        logFeatureFailure(feature, error);
+        return <>{fallback}</>;
+      }}
+    >
+      {children}
+    </ErrorBoundary>
+  );
+}
+
+// Usage
+<FeatureWithFallback
+  feature="ai-suggestions"
+  fallback={<ManualSearch />}
+>
+  <AISuggestions />
+</FeatureWithFallback>
+```
+
+---
+
+## Logging and Monitoring
+
+### Structured Error Logging
+
+```tsx
+interface ErrorLog {
+  error: Error;
+  componentStack: string;
+  timestamp: number;
+  url: string;
+  userId?: string;
+  metadata?: Record<string, unknown>;
+}
+
+function logError(log: ErrorLog): void {
+  // Send to monitoring service
+  fetch('/api/errors', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      message: log.error.message,
+      stack: log.error.stack,
+      componentStack: log.componentStack,
+      timestamp: log.timestamp,
+      url: log.url,
+      userId: log.userId,
+      metadata: log.metadata,
+    }),
+  }).catch(console.error);
+}
+
+class MonitoredErrorBoundary extends Component<Props, State> {
+  componentDidCatch(error: Error, errorInfo: ErrorInfo): void {
+    logError({
+      error,
+      componentStack: errorInfo.componentStack ?? '',
+      timestamp: Date.now(),
+      url: window.location.href,
+      userId: getCurrentUserId(),
+      metadata: {
+        userAgent: navigator.userAgent,
+        viewport: {
+          width: window.innerWidth,
+          height: window.innerHeight,
+        },
+      },
+    });
+  }
+
+  // ... rest of implementation
+}
+```
+
+### Error Aggregation
+
+```tsx
+// Track error frequency to detect patterns
+const errorCounts = new Map<string, number>();
+
+function trackError(error: Error): void {
+  const key = `${error.name}:${error.message}`;
+  const count = (errorCounts.get(key) ?? 0) + 1;
+  errorCounts.set(key, count);
+
+  // Alert if error is recurring
+  if (count > 5) {
+    alertHighFrequencyError(error, count);
+  }
+}
+```
+
+---
+
+## Recovery State Machine
+
+### Explicit State Transitions
+
+```tsx
+type RecoveryState =
+  | { status: 'idle' }
+  | { status: 'error'; error: Error; retries: number }
+  | { status: 'recovering' }
+  | { status: 'degraded'; error: Error }
+  | { status: 'failed'; error: Error };
+
+interface Props {
+  children: ReactNode;
+  maxRetries: number;
+  degradedFallback: ReactNode;
+  failedFallback: ReactNode;
+}
+
+class RecoveryStateMachine extends Component<Props, { state: RecoveryState }> {
+  state = { state: { status: 'idle' } as RecoveryState };
+
+  static getDerivedStateFromError(error: Error): { state: RecoveryState } {
+    return { state: { status: 'error', error, retries: 0 } };
+  }
+
+  retry = (): void => {
+    const current = this.state.state;
+    if (current.status !== 'error') return;
+
+    if (current.retries >= this.props.maxRetries) {
+      this.setState({ state: { status: 'degraded', error: current.error } });
+      return;
+    }
+
+    this.setState({ state: { status: 'recovering' } });
+
+    // Reset after brief delay to allow render
+    setTimeout(() => {
+      this.setState({ state: { status: 'idle' } });
+    }, 100);
+  };
+
+  render(): ReactNode {
+    const { state } = this.state;
+    const { children, degradedFallback, failedFallback } = this.props;
+
+    switch (state.status) {
+      case 'idle':
+      case 'recovering':
+        return children;
+
+      case 'error':
+        return (
+          <div>
+            <p>Error: {state.error.message}</p>
+            <p>Attempt {state.retries + 1} of {this.props.maxRetries}</p>
+            <button onClick={this.retry}>Retry</button>
+          </div>
+        );
+
+      case 'degraded':
+        return degradedFallback;
+
+      case 'failed':
+        return failedFallback;
+    }
+  }
+}
+```
+
+---
+
+## Recovery Strategies Comparison
+
+| Strategy | Use When | Pros | Cons |
+|----------|----------|------|------|
+| **Key reset** | Prop changes should clear error | Simple, automatic | Full remount |
+| **Manual retry** | User should control recovery | Explicit user control | Requires user action |
+| **Auto retry** | Transient errors likely | Seamless for users | May retry indefinitely |
+| **Degraded state** | Partial function better than none | Maintains some UX | Complex to implement |
+| **Navigation** | Component unrecoverable | Clean slate | Loses context |
+
+---
+
+## Best Practices
+
+<Callout type="info" title="Recovery Guidelines">
+1. Always provide a way back to a working state
+2. Preserve user data when possible during recovery
+3. Log errors before recovery for debugging
+4. Consider the user's context when choosing recovery options
+</Callout>
+
+### Do
+
+- Offer multiple recovery paths
+- Preserve form data across retries
+- Show clear error messages
+- Log errors with context
+
+### Don't
+
+- Retry infinitely without user consent
+- Lose user work on error
+- Show technical error details to users
+- Recover silently without feedback

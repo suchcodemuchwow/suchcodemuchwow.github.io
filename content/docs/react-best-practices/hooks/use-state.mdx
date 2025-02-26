@@ -1,0 +1,381 @@
+---
+title: useState Patterns
+description: Effective patterns and common pitfalls for React's useState hook
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## Basic vs Functional Updates
+
+### Direct Updates
+
+Use when the new value doesn't depend on the previous:
+
+```tsx
+const [name, setName] = useState('');
+
+// Direct update
+setName('Alice');
+```
+
+### Functional Updates
+
+Use when the new value depends on the previous:
+
+```tsx
+const [count, setCount] = useState(0);
+
+// Functional update - always gets latest state
+setCount(prev => prev + 1);
+```
+
+| Approach | Use When | Example |
+|----------|----------|---------|
+| Direct | Replacing value entirely | `setName('Bob')` |
+| Functional | Derived from previous | `setCount(c => c + 1)` |
+| Functional | Multiple updates in one handler | Event handlers calling setState multiple times |
+
+<Callout type="warn" title="Stale Closure Trap">
+Direct updates in async callbacks or intervals can capture stale values. Always use functional updates in these cases.
+</Callout>
+
+```tsx
+// Bug: count is stale in the interval
+useEffect(() => {
+  const id = setInterval(() => {
+    setCount(count + 1); // Always adds 1 to initial value
+  }, 1000);
+  return () => clearInterval(id);
+}, []);
+
+// Fix: functional update
+useEffect(() => {
+  const id = setInterval(() => {
+    setCount(prev => prev + 1); // Correctly increments
+  }, 1000);
+  return () => clearInterval(id);
+}, []);
+```
+
+---
+
+## Lazy Initialization
+
+Pass a function to useState when the initial value is expensive to compute:
+
+```tsx
+// Bad: parseData runs on every render
+const [data, setData] = useState(parseExpensiveData(rawInput));
+
+// Good: parseData runs only on mount
+const [data, setData] = useState(() => parseExpensiveData(rawInput));
+```
+
+### When to Use Lazy Initialization
+
+| Scenario | Use Lazy Init? |
+|----------|----------------|
+| Reading from localStorage | Yes |
+| Parsing large data | Yes |
+| Complex calculations | Yes |
+| Simple primitive values | No |
+| Objects/arrays (literal) | No |
+
+```tsx
+// localStorage example
+const [preferences, setPreferences] = useState(() => {
+  const stored = localStorage.getItem('prefs');
+  return stored ? JSON.parse(stored) : defaultPreferences;
+});
+```
+
+---
+
+## State from Props
+
+### Initial Value Pattern
+
+Props set initial state, then component owns it:
+
+```tsx
+interface EditorProps {
+  initialContent: string;
+}
+
+function Editor({ initialContent }: EditorProps) {
+  const [content, setContent] = useState(initialContent);
+
+  // Changes to initialContent prop are ignored after mount
+  return (
+    <textarea
+      value={content}
+      onChange={e => setContent(e.target.value)}
+    />
+  );
+}
+```
+
+<Callout type="warn" title="Common Pitfall">
+State initialized from props only reads the prop once. If the parent's prop changes, the state won't update.
+</Callout>
+
+### Resetting State with Key
+
+Force a component to reset by changing its key:
+
+```tsx
+function Parent() {
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const selectedItem = items.find(i => i.id === selectedId);
+
+  return (
+    <Editor
+      key={selectedId} // New key = new component instance
+      initialContent={selectedItem?.content ?? ''}
+    />
+  );
+}
+```
+
+### When NOT to Initialize from Props
+
+| Pattern | Problem | Solution |
+|---------|---------|----------|
+| Sync state with prop changes | Leads to bugs, stale data | Derive value or lift state |
+| Mirror prop in state | Unnecessary duplication | Use prop directly |
+| Transform prop on every update | useEffect anti-pattern | useMemo for derived values |
+
+```tsx
+// Anti-pattern: syncing state with props
+function BadComponent({ value }: { value: string }) {
+  const [internalValue, setInternalValue] = useState(value);
+
+  useEffect(() => {
+    setInternalValue(value); // Don't do this
+  }, [value]);
+}
+
+// Better: just use the prop, or derive from it
+function GoodComponent({ value }: { value: string }) {
+  const transformedValue = useMemo(() => transform(value), [value]);
+  return <div>{transformedValue}</div>;
+}
+```
+
+---
+
+## Object and Array State Updates
+
+React requires new references to detect changes. Never mutate state directly.
+
+### Object Updates
+
+```tsx
+interface User {
+  name: string;
+  email: string;
+  preferences: {
+    theme: 'light' | 'dark';
+    notifications: boolean;
+  };
+}
+
+const [user, setUser] = useState<User>(initialUser);
+
+// Update single field
+setUser(prev => ({ ...prev, name: 'New Name' }));
+
+// Update nested field
+setUser(prev => ({
+  ...prev,
+  preferences: {
+    ...prev.preferences,
+    theme: 'dark'
+  }
+}));
+```
+
+### Array Updates
+
+```tsx
+const [items, setItems] = useState<Item[]>([]);
+
+// Add item
+setItems(prev => [...prev, newItem]);
+
+// Add at beginning
+setItems(prev => [newItem, ...prev]);
+
+// Remove item
+setItems(prev => prev.filter(item => item.id !== idToRemove));
+
+// Update item
+setItems(prev => prev.map(item =>
+  item.id === idToUpdate ? { ...item, ...updates } : item
+));
+
+// Replace at index
+setItems(prev => [
+  ...prev.slice(0, index),
+  newItem,
+  ...prev.slice(index + 1)
+]);
+```
+
+<Callout type="error" title="Common Mistake">
+Mutation doesn't trigger re-renders and causes subtle bugs.
+</Callout>
+
+```tsx
+// Wrong - mutates existing array
+items.push(newItem);
+setItems(items); // Same reference, no re-render
+
+// Wrong - mutates existing object
+user.name = 'New Name';
+setUser(user); // Same reference, no re-render
+```
+
+---
+
+## Multiple useState vs useReducer
+
+### When to Use Multiple useState
+
+```tsx
+function LoginForm() {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [rememberMe, setRememberMe] = useState(false);
+
+  // Independent state values - multiple useState is fine
+}
+```
+
+### When to Switch to useReducer
+
+| Condition | Example |
+|-----------|---------|
+| Related state updated together | Form with validation errors |
+| Complex update logic | State machine transitions |
+| Next state depends on multiple values | Shopping cart totals |
+| Many state values (4+) | Complex forms |
+
+```tsx
+// Too many related states - consider useReducer
+function ComplexForm() {
+  const [values, setValues] = useState({});
+  const [errors, setErrors] = useState({});
+  const [touched, setTouched] = useState({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
+  // These are all related - useReducer would be cleaner
+}
+```
+
+---
+
+## Common Mistakes
+
+### 1. Forgetting useState Returns a Tuple
+
+```tsx
+// Wrong
+const count = useState(0);
+count + 1; // Error: count is [number, function]
+
+// Right
+const [count, setCount] = useState(0);
+```
+
+### 2. Calling setState in Render
+
+```tsx
+function BadComponent({ value }: { value: number }) {
+  const [computed, setComputed] = useState(0);
+
+  // Wrong: causes infinite loop
+  setComputed(value * 2);
+
+  // Right: derive the value
+  const computed = value * 2;
+}
+```
+
+### 3. Object Identity in Dependencies
+
+```tsx
+function Component() {
+  // New object on every render
+  const [config] = useState({ theme: 'dark' });
+
+  useEffect(() => {
+    // This is fine - config reference is stable from useState
+  }, [config]);
+}
+```
+
+### 4. Overusing State
+
+```tsx
+// Don't store in state what can be derived
+function BadExample({ items }: { items: Item[] }) {
+  const [count, setCount] = useState(items.length); // Unnecessary
+
+  useEffect(() => {
+    setCount(items.length); // Sync attempt
+  }, [items]);
+}
+
+// Just derive it
+function GoodExample({ items }: { items: Item[] }) {
+  const count = items.length; // Computed on each render
+}
+```
+
+### 5. Async State Updates
+
+```tsx
+function AsyncExample() {
+  const [data, setData] = useState<Data | null>(null);
+
+  const handleClick = async () => {
+    const result = await fetchData();
+    // Component might be unmounted by now
+    setData(result); // Can cause warning
+  };
+}
+
+// With cleanup pattern
+function SafeAsyncExample() {
+  const [data, setData] = useState<Data | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    fetchData().then(result => {
+      if (!cancelled) {
+        setData(result);
+      }
+    });
+
+    return () => { cancelled = true; };
+  }, []);
+}
+```
+
+---
+
+## Quick Reference
+
+| Pattern | Code |
+|---------|------|
+| Basic state | `const [value, setValue] = useState(initial)` |
+| Lazy init | `useState(() => expensiveComputation())` |
+| Functional update | `setValue(prev => prev + 1)` |
+| Object update | `setValue(prev => ({ ...prev, key: value }))` |
+| Array add | `setValue(prev => [...prev, item])` |
+| Array remove | `setValue(prev => prev.filter(i => i.id !== id))` |
+| Array update | `setValue(prev => prev.map(i => i.id === id ? {...i, ...update} : i))` |
+| Reset with key | `<Component key={id} initialValue={value} />` |

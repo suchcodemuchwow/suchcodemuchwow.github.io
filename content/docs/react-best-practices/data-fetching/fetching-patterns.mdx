@@ -1,0 +1,403 @@
+---
+title: Fetching Patterns
+description: Common data fetching patterns in React using the fetch API and hooks
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## Overview
+
+Data fetching in React follows predictable patterns. Understanding these patterns helps you choose the right approach for your use case.
+
+## useEffect + fetch Pattern
+
+The most common pattern for fetching data in React components.
+
+```tsx
+import { useState, useEffect } from 'react';
+
+interface User {
+  id: number;
+  name: string;
+  email: string;
+}
+
+function UserProfile({ userId }: { userId: number }) {
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+
+  useEffect(() => {
+    const fetchUser = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        const response = await fetch(`/api/users/${userId}`);
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        const data: User = await response.json();
+        setUser(data);
+      } catch (e) {
+        setError(e instanceof Error ? e : new Error('Unknown error'));
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchUser();
+  }, [userId]);
+
+  if (loading) return <div>Loading...</div>;
+  if (error) return <div>Error: {error.message}</div>;
+  if (!user) return null;
+
+  return <div>{user.name}</div>;
+}
+```
+
+### Pros & Cons
+
+| Pros | Cons |
+|------|------|
+| Simple and straightforward | Verbose boilerplate |
+| No external dependencies | No built-in caching |
+| Full control over fetching logic | Race conditions if not handled |
+| Easy to understand | Repeated code across components |
+
+## Custom useFetch Hook
+
+Extract the fetching logic into a reusable hook.
+
+```tsx
+import { useState, useEffect, useCallback } from 'react';
+
+interface UseFetchResult<T> {
+  data: T | null;
+  loading: boolean;
+  error: Error | null;
+  refetch: () => void;
+}
+
+function useFetch<T>(url: string): UseFetchResult<T> {
+  const [data, setData] = useState<T | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+
+  const fetchData = useCallback(async () => {
+    const controller = new AbortController();
+
+    try {
+      setLoading(true);
+      setError(null);
+      const response = await fetch(url, { signal: controller.signal });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const result: T = await response.json();
+      setData(result);
+    } catch (e) {
+      if (e instanceof Error && e.name !== 'AbortError') {
+        setError(e);
+      }
+    } finally {
+      setLoading(false);
+    }
+
+    return () => controller.abort();
+  }, [url]);
+
+  useEffect(() => {
+    const cleanup = fetchData();
+    return () => {
+      cleanup.then(abort => abort?.());
+    };
+  }, [fetchData]);
+
+  const refetch = useCallback(() => {
+    fetchData();
+  }, [fetchData]);
+
+  return { data, loading, error, refetch };
+}
+
+// Usage
+function UserList() {
+  const { data: users, loading, error, refetch } = useFetch<User[]>('/api/users');
+
+  if (loading) return <div>Loading...</div>;
+  if (error) return <button onClick={refetch}>Retry</button>;
+
+  return (
+    <ul>
+      {users?.map(user => <li key={user.id}>{user.name}</li>)}
+    </ul>
+  );
+}
+```
+
+## Fetch on Mount
+
+Fetch data once when the component mounts.
+
+```tsx
+import { useState, useEffect } from 'react';
+
+function Dashboard() {
+  const [stats, setStats] = useState<DashboardStats | null>(null);
+
+  useEffect(() => {
+    // Empty dependency array = fetch once on mount
+    fetch('/api/dashboard/stats')
+      .then(res => res.json())
+      .then(setStats);
+  }, []);
+
+  return <div>{/* render stats */}</div>;
+}
+```
+
+<Callout type="info">
+Use an empty dependency array `[]` to fetch only on mount. Omitting the array causes fetching on every render.
+</Callout>
+
+## Fetch on Event
+
+Trigger fetching based on user interaction.
+
+```tsx
+import { useState } from 'react';
+
+interface SearchResult {
+  id: number;
+  title: string;
+}
+
+function SearchComponent() {
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<SearchResult[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const handleSearch = async () => {
+    if (!query.trim()) return;
+
+    setLoading(true);
+    try {
+      const response = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
+      const data: SearchResult[] = await response.json();
+      setResults(data);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div>
+      <input
+        value={query}
+        onChange={e => setQuery(e.target.value)}
+        onKeyDown={e => e.key === 'Enter' && handleSearch()}
+      />
+      <button onClick={handleSearch} disabled={loading}>
+        {loading ? 'Searching...' : 'Search'}
+      </button>
+      <ul>
+        {results.map(result => (
+          <li key={result.id}>{result.title}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+```
+
+### When to Use
+
+| Fetch on Mount | Fetch on Event |
+|----------------|----------------|
+| Initial page data | Search functionality |
+| Dashboard stats | Form submissions |
+| User profile on load | Pagination/infinite scroll |
+| Configuration data | Filter changes |
+
+## Fetch on Dependency Change
+
+Re-fetch when specific values change.
+
+```tsx
+import { useState, useEffect } from 'react';
+
+interface Product {
+  id: number;
+  name: string;
+  category: string;
+}
+
+function ProductList({
+  category,
+  sortBy
+}: {
+  category: string;
+  sortBy: 'price' | 'name'
+}) {
+  const [products, setProducts] = useState<Product[]>([]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    fetch(`/api/products?category=${category}&sort=${sortBy}`, {
+      signal: controller.signal
+    })
+      .then(res => res.json())
+      .then(setProducts)
+      .catch(err => {
+        if (err.name !== 'AbortError') {
+          console.error(err);
+        }
+      });
+
+    return () => controller.abort();
+  }, [category, sortBy]); // Re-fetch when either changes
+
+  return (
+    <ul>
+      {products.map(p => <li key={p.id}>{p.name}</li>)}
+    </ul>
+  );
+}
+```
+
+## AbortController Usage
+
+Cancel in-flight requests when the component unmounts or dependencies change.
+
+```tsx
+import { useState, useEffect } from 'react';
+
+function DataFetcher({ endpoint }: { endpoint: string }) {
+  const [data, setData] = useState(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    const fetchData = async () => {
+      try {
+        const response = await fetch(endpoint, {
+          signal: controller.signal
+        });
+        const result = await response.json();
+        setData(result);
+      } catch (error) {
+        // Check if the error is due to abort
+        if (error instanceof Error && error.name === 'AbortError') {
+          console.log('Fetch aborted');
+          return;
+        }
+        throw error;
+      }
+    };
+
+    fetchData();
+
+    // Cleanup: abort the request
+    return () => {
+      controller.abort();
+    };
+  }, [endpoint]);
+
+  return <div>{/* render data */}</div>;
+}
+```
+
+<Callout type="warn">
+Always abort pending requests in the cleanup function. Failing to do so can cause memory leaks and state updates on unmounted components.
+</Callout>
+
+## Error Handling
+
+Comprehensive error handling for fetch requests.
+
+```tsx
+import { useState, useEffect } from 'react';
+
+class FetchError extends Error {
+  constructor(
+    message: string,
+    public status: number,
+    public statusText: string
+  ) {
+    super(message);
+    this.name = 'FetchError';
+  }
+}
+
+async function fetchWithErrorHandling<T>(url: string, options?: RequestInit): Promise<T> {
+  const response = await fetch(url, options);
+
+  if (!response.ok) {
+    throw new FetchError(
+      `Request failed: ${response.statusText}`,
+      response.status,
+      response.statusText
+    );
+  }
+
+  return response.json();
+}
+
+function UserData({ userId }: { userId: number }) {
+  const [user, setUser] = useState<User | null>(null);
+  const [error, setError] = useState<FetchError | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    fetchWithErrorHandling<User>(`/api/users/${userId}`, {
+      signal: controller.signal
+    })
+      .then(setUser)
+      .catch(err => {
+        if (err.name === 'AbortError') return;
+        setError(err);
+      })
+      .finally(() => setLoading(false));
+
+    return () => controller.abort();
+  }, [userId]);
+
+  if (loading) return <div>Loading...</div>;
+
+  if (error) {
+    if (error.status === 404) {
+      return <div>User not found</div>;
+    }
+    if (error.status >= 500) {
+      return <div>Server error. Please try again later.</div>;
+    }
+    return <div>Error: {error.message}</div>;
+  }
+
+  return <div>{user?.name}</div>;
+}
+```
+
+### Error Handling Patterns
+
+| Pattern | Use Case |
+|---------|----------|
+| Status code check | Different UI for 404 vs 500 errors |
+| Custom error class | Structured error information |
+| Error boundaries | Catch rendering errors |
+| Retry logic | Network failures, rate limits |
+| Fallback data | Show cached/default data on error |
+
+## When NOT to Use These Patterns
+
+- **Complex caching requirements** - Consider a caching layer or library
+- **Optimistic updates** - Need more sophisticated state management
+- **Real-time data** - WebSockets or Server-Sent Events are better
+- **Server-side rendering** - Use framework-specific data fetching (Next.js, Remix)
+- **Shared data across components** - Consider lifting state up or context

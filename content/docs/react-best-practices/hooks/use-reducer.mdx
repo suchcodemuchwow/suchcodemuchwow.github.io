@@ -1,0 +1,645 @@
+---
+title: useReducer Patterns
+description: Managing complex state with useReducer in React
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## Overview
+
+useReducer is React's alternative to useState for complex state logic. It centralizes state updates into a single reducer function, making state transitions predictable and testable.
+
+---
+
+## When to Use
+
+- Multiple related state values that update together
+- Complex state update logic with many conditions
+- State machine patterns with defined transitions
+- When next state depends on previous state and multiple values
+- Forms with validation, submission states, and field errors
+- Undo/redo functionality
+
+## When NOT to Use
+
+- Single primitive value (use useState)
+- Independent state pieces that never update together
+- Simple toggle or counter logic
+- When state updates are straightforward assignments
+- Small components with minimal state
+
+---
+
+## Pros and Cons
+
+| Pros | Cons |
+|------|------|
+| Centralized update logic | More boilerplate than useState |
+| Predictable state transitions | Steeper learning curve |
+| Easy to test (pure functions) | Overkill for simple state |
+| Scales well with complexity | Requires action type definitions |
+| Works well with useContext | Verbose for simple operations |
+| Enables state machine patterns | No built-in async support |
+
+---
+
+## useState vs useReducer
+
+| Use useState | Use useReducer |
+|--------------|----------------|
+| Single primitive value | Multiple related values |
+| Independent state pieces | State updates depend on each other |
+| Simple updates | Complex update logic |
+| Few state transitions | State machine behavior |
+| 1-3 state variables | 4+ related state variables |
+
+<Callout type="info" title="Rule of Thumb">
+If you find yourself writing multiple useState calls that always update together, or complex conditional logic in setState calls, consider useReducer.
+</Callout>
+
+### Example: When to Switch
+
+```tsx
+// Getting complex with useState
+function FormWithState() {
+  const [values, setValues] = useState({});
+  const [errors, setErrors] = useState({});
+  const [touched, setTouched] = useState({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [submitCount, setSubmitCount] = useState(0);
+
+  const handleSubmit = () => {
+    setIsSubmitting(true);
+    setSubmitError(null);
+    setSubmitCount(c => c + 1);
+    // Complex interdependent updates...
+  };
+}
+
+// Cleaner with useReducer
+function FormWithReducer() {
+  const [state, dispatch] = useReducer(formReducer, initialState);
+
+  const handleSubmit = () => {
+    dispatch({ type: 'SUBMIT' });
+    // Single action handles all state changes
+  };
+}
+```
+
+---
+
+## Basic Structure
+
+```tsx
+type State = {
+  count: number;
+  step: number;
+};
+
+type Action =
+  | { type: 'INCREMENT' }
+  | { type: 'DECREMENT' }
+  | { type: 'SET_STEP'; step: number }
+  | { type: 'RESET' };
+
+function reducer(state: State, action: Action): State {
+  switch (action.type) {
+    case 'INCREMENT':
+      return { ...state, count: state.count + state.step };
+    case 'DECREMENT':
+      return { ...state, count: state.count - state.step };
+    case 'SET_STEP':
+      return { ...state, step: action.step };
+    case 'RESET':
+      return { count: 0, step: 1 };
+    default:
+      return state;
+  }
+}
+
+const initialState: State = { count: 0, step: 1 };
+
+function Counter() {
+  const [state, dispatch] = useReducer(reducer, initialState);
+
+  return (
+    <div>
+      <p>Count: {state.count}</p>
+      <button onClick={() => dispatch({ type: 'INCREMENT' })}>+</button>
+      <button onClick={() => dispatch({ type: 'DECREMENT' })}>-</button>
+      <input
+        type="number"
+        value={state.step}
+        onChange={e => dispatch({
+          type: 'SET_STEP',
+          step: Number(e.target.value)
+        })}
+      />
+      <button onClick={() => dispatch({ type: 'RESET' })}>Reset</button>
+    </div>
+  );
+}
+```
+
+---
+
+## Action Patterns
+
+### Simple Actions (No Payload)
+
+```tsx
+type Action =
+  | { type: 'INCREMENT' }
+  | { type: 'DECREMENT' }
+  | { type: 'RESET' };
+```
+
+### Actions with Payload
+
+```tsx
+type Action =
+  | { type: 'SET_NAME'; name: string }
+  | { type: 'SET_AGE'; age: number }
+  | { type: 'SET_USER'; user: User };
+```
+
+### Discriminated Unions
+
+TypeScript ensures you handle all action types:
+
+```tsx
+type Action =
+  | { type: 'FETCH_START' }
+  | { type: 'FETCH_SUCCESS'; data: Data }
+  | { type: 'FETCH_ERROR'; error: string };
+
+function reducer(state: State, action: Action): State {
+  switch (action.type) {
+    case 'FETCH_START':
+      return { ...state, loading: true, error: null };
+    case 'FETCH_SUCCESS':
+      // TypeScript knows action.data exists here
+      return { ...state, loading: false, data: action.data };
+    case 'FETCH_ERROR':
+      // TypeScript knows action.error exists here
+      return { ...state, loading: false, error: action.error };
+  }
+}
+```
+
+### Action Creators
+
+Optional pattern for complex payloads:
+
+```tsx
+const actions = {
+  setField: (field: string, value: string) => ({
+    type: 'SET_FIELD' as const,
+    field,
+    value
+  }),
+  validate: () => ({ type: 'VALIDATE' as const }),
+  submit: () => ({ type: 'SUBMIT' as const }),
+  reset: () => ({ type: 'RESET' as const })
+};
+
+// Usage
+dispatch(actions.setField('email', 'test@example.com'));
+dispatch(actions.submit());
+```
+
+---
+
+## Reducer Composition
+
+### By Domain
+
+```tsx
+type State = {
+  user: UserState;
+  todos: TodoState;
+  ui: UIState;
+};
+
+function userReducer(state: UserState, action: Action): UserState {
+  switch (action.type) {
+    case 'SET_USER':
+      return { ...state, ...action.user };
+    case 'LOGOUT':
+      return initialUserState;
+    default:
+      return state;
+  }
+}
+
+function todoReducer(state: TodoState, action: Action): TodoState {
+  switch (action.type) {
+    case 'ADD_TODO':
+      return { ...state, items: [...state.items, action.todo] };
+    case 'TOGGLE_TODO':
+      return {
+        ...state,
+        items: state.items.map(t =>
+          t.id === action.id ? { ...t, done: !t.done } : t
+        )
+      };
+    default:
+      return state;
+  }
+}
+
+// Combined reducer
+function rootReducer(state: State, action: Action): State {
+  return {
+    user: userReducer(state.user, action),
+    todos: todoReducer(state.todos, action),
+    ui: uiReducer(state.ui, action)
+  };
+}
+```
+
+### Shared Actions
+
+Actions can affect multiple slices:
+
+```tsx
+function rootReducer(state: State, action: Action): State {
+  // Handle cross-cutting actions first
+  if (action.type === 'LOGOUT') {
+    return initialState; // Reset everything
+  }
+
+  return {
+    user: userReducer(state.user, action),
+    todos: todoReducer(state.todos, action),
+    ui: uiReducer(state.ui, action)
+  };
+}
+```
+
+---
+
+## Immutable Updates (Without Immer)
+
+### Nested Object Updates
+
+```tsx
+type State = {
+  user: {
+    profile: {
+      name: string;
+      address: {
+        city: string;
+        country: string;
+      };
+    };
+  };
+};
+
+function reducer(state: State, action: Action): State {
+  switch (action.type) {
+    case 'SET_CITY':
+      return {
+        ...state,
+        user: {
+          ...state.user,
+          profile: {
+            ...state.user.profile,
+            address: {
+              ...state.user.profile.address,
+              city: action.city
+            }
+          }
+        }
+      };
+    default:
+      return state;
+  }
+}
+```
+
+<Callout type="info" title="Deep Nesting">
+If you find yourself spreading 4+ levels deep, consider flattening your state shape or splitting into multiple reducers.
+</Callout>
+
+### Array Operations
+
+```tsx
+type TodoState = {
+  items: Todo[];
+  filter: 'all' | 'active' | 'completed';
+};
+
+function todoReducer(state: TodoState, action: TodoAction): TodoState {
+  switch (action.type) {
+    // Add item
+    case 'ADD':
+      return {
+        ...state,
+        items: [...state.items, action.todo]
+      };
+
+    // Remove item
+    case 'REMOVE':
+      return {
+        ...state,
+        items: state.items.filter(t => t.id !== action.id)
+      };
+
+    // Update item
+    case 'UPDATE':
+      return {
+        ...state,
+        items: state.items.map(t =>
+          t.id === action.id ? { ...t, ...action.updates } : t
+        )
+      };
+
+    // Toggle item
+    case 'TOGGLE':
+      return {
+        ...state,
+        items: state.items.map(t =>
+          t.id === action.id ? { ...t, done: !t.done } : t
+        )
+      };
+
+    // Reorder items
+    case 'REORDER':
+      const items = [...state.items];
+      const [removed] = items.splice(action.from, 1);
+      items.splice(action.to, 0, removed);
+      return { ...state, items };
+
+    default:
+      return state;
+  }
+}
+```
+
+---
+
+## Testing Reducers
+
+Reducers are pure functions: easy to test in isolation.
+
+```tsx
+// reducer.ts
+export type State = { count: number; step: number };
+export type Action =
+  | { type: 'INCREMENT' }
+  | { type: 'SET_STEP'; step: number };
+
+export function reducer(state: State, action: Action): State {
+  switch (action.type) {
+    case 'INCREMENT':
+      return { ...state, count: state.count + state.step };
+    case 'SET_STEP':
+      return { ...state, step: action.step };
+    default:
+      return state;
+  }
+}
+
+// reducer.test.ts
+import { reducer, State, Action } from './reducer';
+
+describe('counter reducer', () => {
+  const initialState: State = { count: 0, step: 1 };
+
+  it('increments by step', () => {
+    const state = { count: 5, step: 3 };
+    const result = reducer(state, { type: 'INCREMENT' });
+    expect(result).toEqual({ count: 8, step: 3 });
+  });
+
+  it('sets step', () => {
+    const result = reducer(initialState, { type: 'SET_STEP', step: 5 });
+    expect(result).toEqual({ count: 0, step: 5 });
+  });
+
+  it('returns current state for unknown action', () => {
+    const result = reducer(initialState, { type: 'UNKNOWN' } as Action);
+    expect(result).toBe(initialState);
+  });
+});
+```
+
+### Testing State Transitions
+
+```tsx
+describe('form reducer', () => {
+  it('handles complete submission flow', () => {
+    let state = initialState;
+
+    // Start submission
+    state = reducer(state, { type: 'SUBMIT_START' });
+    expect(state.isSubmitting).toBe(true);
+    expect(state.error).toBeNull();
+
+    // Success
+    state = reducer(state, { type: 'SUBMIT_SUCCESS' });
+    expect(state.isSubmitting).toBe(false);
+    expect(state.isSubmitted).toBe(true);
+  });
+
+  it('handles submission error', () => {
+    let state = reducer(initialState, { type: 'SUBMIT_START' });
+
+    state = reducer(state, {
+      type: 'SUBMIT_ERROR',
+      error: 'Network error'
+    });
+
+    expect(state.isSubmitting).toBe(false);
+    expect(state.error).toBe('Network error');
+  });
+});
+```
+
+---
+
+## Init Function Pattern
+
+Lazy initialization for expensive setup or when initial state depends on props:
+
+```tsx
+type State = {
+  items: Item[];
+  selectedIds: Set<string>;
+};
+
+function init(initialItems: Item[]): State {
+  return {
+    items: initialItems,
+    selectedIds: new Set()
+  };
+}
+
+function reducer(state: State, action: Action): State {
+  switch (action.type) {
+    case 'SELECT':
+      const newSelected = new Set(state.selectedIds);
+      newSelected.add(action.id);
+      return { ...state, selectedIds: newSelected };
+    case 'RESET':
+      return init(action.items); // Re-initialize
+    default:
+      return state;
+  }
+}
+
+function ItemList({ initialItems }: { initialItems: Item[] }) {
+  // Third argument is init function, second is arg passed to it
+  const [state, dispatch] = useReducer(reducer, initialItems, init);
+
+  return (/* ... */);
+}
+```
+
+### Init vs Inline Initial State
+
+| Pattern | Use When |
+|---------|----------|
+| Inline `{ ... }` | Simple, static initial state |
+| Init function | Expensive computation, props-based init, complex setup |
+
+```tsx
+// Inline: simple static state
+const [state, dispatch] = useReducer(reducer, { count: 0, step: 1 });
+
+// Init function: derived from props
+const [state, dispatch] = useReducer(reducer, props.items, initFromItems);
+
+// Init function: expensive setup
+const [state, dispatch] = useReducer(reducer, null, () => {
+  return parseComplexData(localStorage.getItem('data'));
+});
+```
+
+---
+
+## Practical Example: Form State
+
+```tsx
+type FormState = {
+  values: Record<string, string>;
+  errors: Record<string, string>;
+  touched: Record<string, boolean>;
+  isSubmitting: boolean;
+  isValid: boolean;
+};
+
+type FormAction =
+  | { type: 'SET_FIELD'; field: string; value: string }
+  | { type: 'SET_ERROR'; field: string; error: string }
+  | { type: 'TOUCH_FIELD'; field: string }
+  | { type: 'SUBMIT_START' }
+  | { type: 'SUBMIT_SUCCESS' }
+  | { type: 'SUBMIT_ERROR'; errors: Record<string, string> }
+  | { type: 'RESET' };
+
+const initialFormState: FormState = {
+  values: {},
+  errors: {},
+  touched: {},
+  isSubmitting: false,
+  isValid: true
+};
+
+function formReducer(state: FormState, action: FormAction): FormState {
+  switch (action.type) {
+    case 'SET_FIELD':
+      return {
+        ...state,
+        values: { ...state.values, [action.field]: action.value },
+        errors: { ...state.errors, [action.field]: '' }
+      };
+
+    case 'SET_ERROR':
+      return {
+        ...state,
+        errors: { ...state.errors, [action.field]: action.error },
+        isValid: false
+      };
+
+    case 'TOUCH_FIELD':
+      return {
+        ...state,
+        touched: { ...state.touched, [action.field]: true }
+      };
+
+    case 'SUBMIT_START':
+      return { ...state, isSubmitting: true };
+
+    case 'SUBMIT_SUCCESS':
+      return { ...state, isSubmitting: false };
+
+    case 'SUBMIT_ERROR':
+      return {
+        ...state,
+        isSubmitting: false,
+        errors: action.errors,
+        isValid: false
+      };
+
+    case 'RESET':
+      return initialFormState;
+
+    default:
+      return state;
+  }
+}
+
+function useForm() {
+  const [state, dispatch] = useReducer(formReducer, initialFormState);
+
+  const setField = (field: string, value: string) => {
+    dispatch({ type: 'SET_FIELD', field, value });
+  };
+
+  const touchField = (field: string) => {
+    dispatch({ type: 'TOUCH_FIELD', field });
+  };
+
+  const submit = async (onSubmit: (values: Record<string, string>) => Promise<void>) => {
+    dispatch({ type: 'SUBMIT_START' });
+    try {
+      await onSubmit(state.values);
+      dispatch({ type: 'SUBMIT_SUCCESS' });
+    } catch (error) {
+      dispatch({ type: 'SUBMIT_ERROR', errors: { form: 'Submission failed' } });
+    }
+  };
+
+  return { state, setField, touchField, submit };
+}
+```
+
+---
+
+## Quick Reference
+
+```tsx
+// Basic structure
+const [state, dispatch] = useReducer(reducer, initialState);
+
+// With init function
+const [state, dispatch] = useReducer(reducer, initialArg, init);
+
+// Dispatch actions
+dispatch({ type: 'ACTION_NAME' });
+dispatch({ type: 'ACTION_WITH_PAYLOAD', payload: value });
+
+// Type-safe reducer
+function reducer(state: State, action: Action): State {
+  switch (action.type) {
+    case 'ACTION':
+      return { ...state, /* updates */ };
+    default:
+      return state;
+  }
+}
+```

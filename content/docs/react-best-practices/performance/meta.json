@@ -1,0 +1,4 @@
+{
+  "title": "Performance",
+  "pages": ["render-optimization", "memoization", "code-splitting", "profiling", "performance-pitfalls", "optimization"]
+}

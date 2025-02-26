@@ -1,0 +1,569 @@
+---
+title: Controlled Inputs
+description: Patterns for managing form inputs with React state
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## What Are Controlled Inputs?
+
+A controlled input is a form element whose value is driven by React state. The component "controls" the input by:
+1. Storing the value in state
+2. Passing state to the input's `value` prop
+3. Updating state via `onChange`
+
+```tsx
+function ControlledInput() {
+  const [value, setValue] = useState('');
+
+  return (
+    <input
+      type="text"
+      value={value}
+      onChange={(e) => setValue(e.target.value)}
+    />
+  );
+}
+```
+
+---
+
+## Basic Patterns
+
+### Text Input
+
+```tsx
+interface TextInputProps {
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+}
+
+function TextInput({ value, onChange, placeholder }: TextInputProps) {
+  return (
+    <input
+      type="text"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      placeholder={placeholder}
+    />
+  );
+}
+
+// Usage
+function Form() {
+  const [name, setName] = useState('');
+
+  return <TextInput value={name} onChange={setName} placeholder="Enter name" />;
+}
+```
+
+### Textarea
+
+```tsx
+interface TextAreaProps {
+  value: string;
+  onChange: (value: string) => void;
+  rows?: number;
+}
+
+function TextArea({ value, onChange, rows = 4 }: TextAreaProps) {
+  return (
+    <textarea
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      rows={rows}
+    />
+  );
+}
+```
+
+### Select
+
+```tsx
+interface Option {
+  value: string;
+  label: string;
+}
+
+interface SelectProps {
+  value: string;
+  onChange: (value: string) => void;
+  options: Option[];
+}
+
+function Select({ value, onChange, options }: SelectProps) {
+  return (
+    <select value={value} onChange={(e) => onChange(e.target.value)}>
+      <option value="">Select an option</option>
+      {options.map((option) => (
+        <option key={option.value} value={option.value}>
+          {option.label}
+        </option>
+      ))}
+    </select>
+  );
+}
+```
+
+### Checkbox
+
+```tsx
+interface CheckboxProps {
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  label: string;
+}
+
+function Checkbox({ checked, onChange, label }: CheckboxProps) {
+  return (
+    <label>
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+      />
+      {label}
+    </label>
+  );
+}
+```
+
+### Radio Group
+
+```tsx
+interface RadioOption {
+  value: string;
+  label: string;
+}
+
+interface RadioGroupProps {
+  name: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: RadioOption[];
+}
+
+function RadioGroup({ name, value, onChange, options }: RadioGroupProps) {
+  return (
+    <fieldset>
+      {options.map((option) => (
+        <label key={option.value}>
+          <input
+            type="radio"
+            name={name}
+            value={option.value}
+            checked={value === option.value}
+            onChange={(e) => onChange(e.target.value)}
+          />
+          {option.label}
+        </label>
+      ))}
+    </fieldset>
+  );
+}
+```
+
+---
+
+## Form State Management
+
+### Single Object State
+
+```tsx
+interface FormData {
+  firstName: string;
+  lastName: string;
+  email: string;
+  newsletter: boolean;
+}
+
+function ContactForm() {
+  const [formData, setFormData] = useState<FormData>({
+    firstName: '',
+    lastName: '',
+    email: '',
+    newsletter: false,
+  });
+
+  const updateField = <K extends keyof FormData>(
+    field: K,
+    value: FormData[K]
+  ) => {
+    setFormData((prev) => ({ ...prev, [field]: value }));
+  };
+
+  return (
+    <form>
+      <input
+        value={formData.firstName}
+        onChange={(e) => updateField('firstName', e.target.value)}
+      />
+      <input
+        value={formData.lastName}
+        onChange={(e) => updateField('lastName', e.target.value)}
+      />
+      <input
+        type="email"
+        value={formData.email}
+        onChange={(e) => updateField('email', e.target.value)}
+      />
+      <label>
+        <input
+          type="checkbox"
+          checked={formData.newsletter}
+          onChange={(e) => updateField('newsletter', e.target.checked)}
+        />
+        Subscribe to newsletter
+      </label>
+    </form>
+  );
+}
+```
+
+### Generic Change Handler
+
+```tsx
+function ContactForm() {
+  const [formData, setFormData] = useState({
+    firstName: '',
+    lastName: '',
+    email: '',
+  });
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { name, value, type, checked } = e.target;
+    setFormData((prev) => ({
+      ...prev,
+      [name]: type === 'checkbox' ? checked : value,
+    }));
+  };
+
+  return (
+    <form>
+      <input name="firstName" value={formData.firstName} onChange={handleChange} />
+      <input name="lastName" value={formData.lastName} onChange={handleChange} />
+      <input name="email" type="email" value={formData.email} onChange={handleChange} />
+    </form>
+  );
+}
+```
+
+<Callout type="info" title="Performance Note">
+Using a single object for form state causes all inputs to re-render on every change. For forms with many fields, consider using separate state variables or `useReducer`.
+</Callout>
+
+---
+
+## useReducer for Complex Forms
+
+```tsx
+interface FormState {
+  values: {
+    email: string;
+    password: string;
+    confirmPassword: string;
+  };
+  touched: Record<string, boolean>;
+  errors: Record<string, string>;
+}
+
+type FormAction =
+  | { type: 'SET_VALUE'; field: string; value: string }
+  | { type: 'SET_TOUCHED'; field: string }
+  | { type: 'SET_ERROR'; field: string; error: string }
+  | { type: 'RESET' };
+
+function formReducer(state: FormState, action: FormAction): FormState {
+  switch (action.type) {
+    case 'SET_VALUE':
+      return {
+        ...state,
+        values: { ...state.values, [action.field]: action.value },
+      };
+    case 'SET_TOUCHED':
+      return {
+        ...state,
+        touched: { ...state.touched, [action.field]: true },
+      };
+    case 'SET_ERROR':
+      return {
+        ...state,
+        errors: { ...state.errors, [action.field]: action.error },
+      };
+    case 'RESET':
+      return initialState;
+    default:
+      return state;
+  }
+}
+
+const initialState: FormState = {
+  values: { email: '', password: '', confirmPassword: '' },
+  touched: {},
+  errors: {},
+};
+
+function SignupForm() {
+  const [state, dispatch] = useReducer(formReducer, initialState);
+
+  const handleChange = (field: string) => (e: React.ChangeEvent<HTMLInputElement>) => {
+    dispatch({ type: 'SET_VALUE', field, value: e.target.value });
+  };
+
+  const handleBlur = (field: string) => () => {
+    dispatch({ type: 'SET_TOUCHED', field });
+  };
+
+  return (
+    <form>
+      <input
+        type="email"
+        value={state.values.email}
+        onChange={handleChange('email')}
+        onBlur={handleBlur('email')}
+      />
+      {state.touched.email && state.errors.email && (
+        <span>{state.errors.email}</span>
+      )}
+    </form>
+  );
+}
+```
+
+---
+
+## Custom Hook Pattern
+
+```tsx
+function useFormField<T>(initialValue: T) {
+  const [value, setValue] = useState(initialValue);
+  const [touched, setTouched] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const reset = () => {
+    setValue(initialValue);
+    setTouched(false);
+    setError(null);
+  };
+
+  return {
+    value,
+    setValue,
+    touched,
+    setTouched,
+    error,
+    setError,
+    reset,
+    bind: {
+      value,
+      onChange: (e: React.ChangeEvent<HTMLInputElement>) => setValue(e.target.value as T),
+      onBlur: () => setTouched(true),
+    },
+  };
+}
+
+// Usage
+function LoginForm() {
+  const email = useFormField('');
+  const password = useFormField('');
+
+  return (
+    <form>
+      <input type="email" {...email.bind} />
+      <input type="password" {...password.bind} />
+    </form>
+  );
+}
+```
+
+---
+
+## Input Transformations
+
+### Uppercase Input
+
+```tsx
+function UppercaseInput({ value, onChange }: InputProps) {
+  return (
+    <input
+      value={value}
+      onChange={(e) => onChange(e.target.value.toUpperCase())}
+    />
+  );
+}
+```
+
+### Numeric Input
+
+```tsx
+function NumericInput({ value, onChange }: { value: number; onChange: (n: number) => void }) {
+  const [displayValue, setDisplayValue] = useState(String(value));
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const raw = e.target.value;
+    // Allow empty string and valid numbers
+    if (raw === '' || /^-?\d*\.?\d*$/.test(raw)) {
+      setDisplayValue(raw);
+      const num = parseFloat(raw);
+      if (!isNaN(num)) {
+        onChange(num);
+      }
+    }
+  };
+
+  const handleBlur = () => {
+    // Sync display with actual value on blur
+    setDisplayValue(String(value));
+  };
+
+  return (
+    <input
+      type="text"
+      inputMode="decimal"
+      value={displayValue}
+      onChange={handleChange}
+      onBlur={handleBlur}
+    />
+  );
+}
+```
+
+### Phone Number Formatting
+
+```tsx
+function formatPhoneNumber(value: string): string {
+  const digits = value.replace(/\D/g, '');
+  if (digits.length <= 3) return digits;
+  if (digits.length <= 6) return `(${digits.slice(0, 3)}) ${digits.slice(3)}`;
+  return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6, 10)}`;
+}
+
+function PhoneInput({ value, onChange }: InputProps) {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const formatted = formatPhoneNumber(e.target.value);
+    onChange(formatted);
+  };
+
+  return (
+    <input
+      type="tel"
+      value={value}
+      onChange={handleChange}
+      placeholder="(555) 555-5555"
+    />
+  );
+}
+```
+
+---
+
+## Controlled vs Uncontrolled
+
+| Aspect | Controlled | Uncontrolled |
+|--------|-----------|--------------|
+| Value source | React state | DOM |
+| Validation | On every change | On submit |
+| Dynamic behavior | Easy | Difficult |
+| Performance | More re-renders | Fewer re-renders |
+| Testing | Predictable | Requires DOM queries |
+| Complexity | More boilerplate | Less code |
+
+---
+
+## When to Use Controlled Inputs
+
+### Use Controlled When
+
+- Input value affects other UI elements
+- Real-time validation is needed
+- Formatting or transforming input
+- Conditional field visibility
+- Complex form interactions
+- Programmatic value changes needed
+
+### Examples of Controlled Use Cases
+
+```tsx
+// Real-time character count
+function TextAreaWithCount() {
+  const [text, setText] = useState('');
+  const maxLength = 280;
+
+  return (
+    <div>
+      <textarea value={text} onChange={(e) => setText(e.target.value)} />
+      <span>{text.length}/{maxLength}</span>
+    </div>
+  );
+}
+
+// Dependent fields
+function LocationForm() {
+  const [country, setCountry] = useState('');
+  const [state, setState] = useState('');
+  const states = useStatesForCountry(country);
+
+  return (
+    <>
+      <Select value={country} onChange={setCountry} options={countries} />
+      <Select value={state} onChange={setState} options={states} />
+    </>
+  );
+}
+```
+
+---
+
+## When NOT to Use Controlled Inputs
+
+### Consider Uncontrolled When
+
+- Simple forms with submit-only validation
+- File inputs (always uncontrolled)
+- Performance-critical scenarios with many inputs
+- Integrating with non-React code
+- One-time value capture (no real-time needs)
+
+<Callout type="warn" title="Avoid Mixing">
+Never switch an input between controlled and uncontrolled during its lifetime. This causes bugs and React warnings.
+</Callout>
+
+```tsx
+// BAD: Switches from uncontrolled to controlled
+function BadInput() {
+  const [value, setValue] = useState<string | undefined>(undefined);
+
+  return (
+    <input
+      value={value} // undefined = uncontrolled, then string = controlled
+      onChange={(e) => setValue(e.target.value)}
+    />
+  );
+}
+
+// GOOD: Always controlled
+function GoodInput() {
+  const [value, setValue] = useState(''); // Always a string
+
+  return (
+    <input
+      value={value}
+      onChange={(e) => setValue(e.target.value)}
+    />
+  );
+}
+```
+
+---
+
+## Pros and Cons
+
+| Pros | Cons |
+|------|------|
+| Single source of truth | More boilerplate code |
+| Easy to validate on change | Re-renders on every keystroke |
+| Predictable state | Requires careful state structure |
+| Easy to test | Can cause performance issues |
+| Dynamic UI updates | More complex for simple forms |
+| Full control over value | Need to handle all input types |

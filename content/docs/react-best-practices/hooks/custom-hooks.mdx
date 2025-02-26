@@ -1,0 +1,620 @@
+---
+title: Custom Hooks
+description: Building reusable logic with custom React hooks
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## Overview
+
+Custom hooks let you extract component logic into reusable functions. They follow the same rules as built-in hooks and can compose other hooks to create powerful abstractions.
+
+---
+
+## When to Use
+
+- Duplicate stateful logic across components
+- Complex useState + useEffect combinations
+- Logic that can be named and documented clearly
+- Reusable behavior like debouncing, polling, or subscriptions
+- Encapsulating third-party library integrations
+- Sharing non-visual logic between components
+
+## When NOT to Use
+
+- Logic used in only one component (keep inline first)
+- Pure computation without hooks (use regular functions)
+- Simple one-liner state operations
+- When extraction would obscure what the code does
+- Premature abstraction before seeing patterns
+
+---
+
+## Pros and Cons
+
+| Pros | Cons |
+|------|------|
+| Reusable stateful logic | Can hide complexity |
+| Cleaner component code | Extra abstraction layer |
+| Testable in isolation | Must follow hook rules |
+| Composable with other hooks | Naming can be challenging |
+| Encapsulates side effects | Over-extraction reduces clarity |
+| Follows React patterns | Requires understanding hook rules |
+
+---
+
+## Extraction Patterns
+
+### When to Extract
+
+| Signal | Action |
+|--------|--------|
+| Duplicate logic across components | Extract to hook |
+| Complex useState + useEffect combo | Extract to hook |
+| Logic can be named clearly | Extract to hook |
+| Single component, simple logic | Keep inline |
+
+### Before: Inline Logic
+
+```tsx
+function UserProfile({ userId }: { userId: string }) {
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+
+    fetchUser(userId)
+      .then(data => {
+        if (!cancelled) setUser(data);
+      })
+      .catch(err => {
+        if (!cancelled) setError(err);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [userId]);
+
+  if (loading) return <Spinner />;
+  if (error) return <Error error={error} />;
+  return <Profile user={user!} />;
+}
+```
+
+### After: Custom Hook
+
+```tsx
+function useUser(userId: string) {
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+
+    fetchUser(userId)
+      .then(data => {
+        if (!cancelled) setUser(data);
+      })
+      .catch(err => {
+        if (!cancelled) setError(err);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [userId]);
+
+  return { user, loading, error };
+}
+
+function UserProfile({ userId }: { userId: string }) {
+  const { user, loading, error } = useUser(userId);
+
+  if (loading) return <Spinner />;
+  if (error) return <Error error={error} />;
+  return <Profile user={user!} />;
+}
+```
+
+---
+
+## Naming Conventions
+
+### Prefix with "use"
+
+```tsx
+// Correct
+function useWindowSize() { }
+function useLocalStorage() { }
+function useAuth() { }
+
+// Wrong - not recognized as a hook
+function getWindowSize() { }
+function withLocalStorage() { }
+```
+
+### Naming Patterns
+
+| Pattern | Use For | Examples |
+|---------|---------|----------|
+| `use[Resource]` | Data fetching | `useUser`, `usePosts`, `useProducts` |
+| `use[Action]` | Behavior/utility | `useDebounce`, `useToggle`, `useCopy` |
+| `use[State]` | Shared state | `useAuth`, `useTheme`, `useCart` |
+| `use[Feature]` | Feature-specific | `useSearch`, `usePagination` |
+| `useOn[Event]` | Event handlers | `useOnClickOutside`, `useOnKeyPress` |
+| `useIs[Condition]` | Boolean state | `useIsOnline`, `useIsMounted` |
+
+<Callout type="info" title="Naming Matters">
+Good names describe what the hook does, not how it works. `useUserData` is better than `useFetchAndCacheWithRetry`.
+</Callout>
+
+---
+
+## Return Value Patterns
+
+### Tuple (Array) - For Simple State
+
+```tsx
+function useToggle(initialValue = false): [boolean, () => void] {
+  const [value, setValue] = useState(initialValue);
+  const toggle = useCallback(() => setValue(v => !v), []);
+
+  return [value, toggle];
+}
+
+// Usage - can rename freely
+const [isOpen, toggleOpen] = useToggle();
+const [isVisible, toggleVisibility] = useToggle(true);
+```
+
+### Object - For Multiple Values
+
+```tsx
+interface UseCounterReturn {
+  count: number;
+  increment: () => void;
+  decrement: () => void;
+  reset: () => void;
+  set: (value: number) => void;
+}
+
+function useCounter(initialValue = 0): UseCounterReturn {
+  const [count, setCount] = useState(initialValue);
+
+  return {
+    count,
+    increment: useCallback(() => setCount(c => c + 1), []),
+    decrement: useCallback(() => setCount(c => c - 1), []),
+    reset: useCallback(() => setCount(initialValue), [initialValue]),
+    set: setCount
+  };
+}
+
+// Usage - destructure what you need
+const { count, increment } = useCounter();
+const { count: items, increment: addItem } = useCounter();
+```
+
+### When to Use Which
+
+| Return Type | Use When |
+|-------------|----------|
+| Tuple `[a, b]` | 2-3 values, useState-like pattern |
+| Object `{ a, b }` | 4+ values, or values often used partially |
+| Single value | Simple computed value |
+
+```tsx
+// Tuple: matches useState convention
+const [value, setValue] = useLocalStorage('key', defaultValue);
+
+// Object: many values, partial usage common
+const { data, loading, error, refetch } = useFetch(url);
+
+// Single value: simple result
+const debouncedValue = useDebounce(value, 300);
+const isOnline = useOnlineStatus();
+```
+
+---
+
+## Composing Hooks
+
+### Hooks Using Other Hooks
+
+```tsx
+function useLocalStorage<T>(key: string, initialValue: T) {
+  const [storedValue, setStoredValue] = useState<T>(() => {
+    const item = localStorage.getItem(key);
+    return item ? JSON.parse(item) : initialValue;
+  });
+
+  const setValue = useCallback((value: T | ((prev: T) => T)) => {
+    setStoredValue(prev => {
+      const valueToStore = value instanceof Function ? value(prev) : value;
+      localStorage.setItem(key, JSON.stringify(valueToStore));
+      return valueToStore;
+    });
+  }, [key]);
+
+  return [storedValue, setValue] as const;
+}
+
+// Composed hook using useLocalStorage
+function useTheme() {
+  const [theme, setTheme] = useLocalStorage<'light' | 'dark'>('theme', 'light');
+
+  const toggleTheme = useCallback(() => {
+    setTheme(t => t === 'light' ? 'dark' : 'light');
+  }, [setTheme]);
+
+  // Apply theme to document
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+  }, [theme]);
+
+  return { theme, setTheme, toggleTheme };
+}
+```
+
+### Combining Multiple Hooks
+
+```tsx
+function useFormField(initialValue: string) {
+  const [value, setValue] = useState(initialValue);
+  const [touched, setTouched] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleChange = useCallback((e: ChangeEvent<HTMLInputElement>) => {
+    setValue(e.target.value);
+    if (error) setError(null);
+  }, [error]);
+
+  const handleBlur = useCallback(() => {
+    setTouched(true);
+  }, []);
+
+  const reset = useCallback(() => {
+    setValue(initialValue);
+    setTouched(false);
+    setError(null);
+  }, [initialValue]);
+
+  return {
+    value,
+    touched,
+    error,
+    onChange: handleChange,
+    onBlur: handleBlur,
+    setError,
+    reset,
+    // Spread-friendly props
+    inputProps: {
+      value,
+      onChange: handleChange,
+      onBlur: handleBlur
+    }
+  };
+}
+
+// Usage
+function LoginForm() {
+  const email = useFormField('');
+  const password = useFormField('');
+
+  return (
+    <form>
+      <input type="email" {...email.inputProps} />
+      {email.touched && email.error && <span>{email.error}</span>}
+
+      <input type="password" {...password.inputProps} />
+      {password.touched && password.error && <span>{password.error}</span>}
+    </form>
+  );
+}
+```
+
+---
+
+## Testing Custom Hooks
+
+### Test Pattern
+
+```tsx
+// useCounter.ts
+export function useCounter(initialValue = 0) {
+  const [count, setCount] = useState(initialValue);
+
+  return {
+    count,
+    increment: () => setCount(c => c + 1),
+    decrement: () => setCount(c => c - 1),
+    reset: () => setCount(initialValue)
+  };
+}
+
+// useCounter.test.tsx
+import { renderHook, act } from '@testing-library/react';
+import { useCounter } from './useCounter';
+
+describe('useCounter', () => {
+  it('initializes with default value', () => {
+    const { result } = renderHook(() => useCounter());
+    expect(result.current.count).toBe(0);
+  });
+
+  it('initializes with provided value', () => {
+    const { result } = renderHook(() => useCounter(10));
+    expect(result.current.count).toBe(10);
+  });
+
+  it('increments count', () => {
+    const { result } = renderHook(() => useCounter());
+
+    act(() => {
+      result.current.increment();
+    });
+
+    expect(result.current.count).toBe(1);
+  });
+
+  it('resets to initial value', () => {
+    const { result } = renderHook(() => useCounter(5));
+
+    act(() => {
+      result.current.increment();
+      result.current.increment();
+      result.current.reset();
+    });
+
+    expect(result.current.count).toBe(5);
+  });
+});
+```
+
+### Testing with Props Changes
+
+```tsx
+it('responds to prop changes', () => {
+  const { result, rerender } = renderHook(
+    ({ userId }) => useUser(userId),
+    { initialProps: { userId: '1' } }
+  );
+
+  expect(result.current.userId).toBe('1');
+
+  rerender({ userId: '2' });
+
+  expect(result.current.userId).toBe('2');
+});
+```
+
+### Testing Async Hooks
+
+```tsx
+it('fetches data', async () => {
+  const { result } = renderHook(() => useFetch('/api/data'));
+
+  // Initially loading
+  expect(result.current.loading).toBe(true);
+
+  // Wait for fetch to complete
+  await waitFor(() => {
+    expect(result.current.loading).toBe(false);
+  });
+
+  expect(result.current.data).toBeDefined();
+});
+```
+
+---
+
+## Common Custom Hook Examples
+
+### useDebounce
+
+```tsx
+function useDebounce<T>(value: T, delay: number): T {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedValue(value);
+    }, delay);
+
+    return () => clearTimeout(timer);
+  }, [value, delay]);
+
+  return debouncedValue;
+}
+
+// Usage
+function Search() {
+  const [query, setQuery] = useState('');
+  const debouncedQuery = useDebounce(query, 300);
+
+  useEffect(() => {
+    if (debouncedQuery) {
+      searchAPI(debouncedQuery);
+    }
+  }, [debouncedQuery]);
+}
+```
+
+### useOnClickOutside
+
+```tsx
+function useOnClickOutside<T extends HTMLElement>(
+  ref: RefObject<T>,
+  handler: (event: MouseEvent | TouchEvent) => void
+) {
+  useEffect(() => {
+    const listener = (event: MouseEvent | TouchEvent) => {
+      if (!ref.current || ref.current.contains(event.target as Node)) {
+        return;
+      }
+      handler(event);
+    };
+
+    document.addEventListener('mousedown', listener);
+    document.addEventListener('touchstart', listener);
+
+    return () => {
+      document.removeEventListener('mousedown', listener);
+      document.removeEventListener('touchstart', listener);
+    };
+  }, [ref, handler]);
+}
+
+// Usage
+function Dropdown() {
+  const [isOpen, setIsOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useOnClickOutside(ref, () => setIsOpen(false));
+
+  return (
+    <div ref={ref}>
+      <button onClick={() => setIsOpen(true)}>Open</button>
+      {isOpen && <div className="dropdown">Content</div>}
+    </div>
+  );
+}
+```
+
+### useMediaQuery
+
+```tsx
+function useMediaQuery(query: string): boolean {
+  const [matches, setMatches] = useState(() => {
+    return window.matchMedia(query).matches;
+  });
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia(query);
+
+    const handleChange = (event: MediaQueryListEvent) => {
+      setMatches(event.matches);
+    };
+
+    mediaQuery.addEventListener('change', handleChange);
+
+    // Set initial value
+    setMatches(mediaQuery.matches);
+
+    return () => {
+      mediaQuery.removeEventListener('change', handleChange);
+    };
+  }, [query]);
+
+  return matches;
+}
+
+// Usage
+function ResponsiveComponent() {
+  const isMobile = useMediaQuery('(max-width: 768px)');
+
+  return isMobile ? <MobileLayout /> : <DesktopLayout />;
+}
+```
+
+### useInterval
+
+```tsx
+function useInterval(callback: () => void, delay: number | null) {
+  const savedCallback = useRef(callback);
+
+  // Update ref to latest callback
+  useEffect(() => {
+    savedCallback.current = callback;
+  }, [callback]);
+
+  useEffect(() => {
+    if (delay === null) return;
+
+    const id = setInterval(() => savedCallback.current(), delay);
+    return () => clearInterval(id);
+  }, [delay]);
+}
+
+// Usage
+function Timer() {
+  const [count, setCount] = useState(0);
+  const [isRunning, setIsRunning] = useState(true);
+
+  useInterval(
+    () => setCount(c => c + 1),
+    isRunning ? 1000 : null // null pauses the interval
+  );
+
+  return (
+    <div>
+      <span>{count}</span>
+      <button onClick={() => setIsRunning(r => !r)}>
+        {isRunning ? 'Pause' : 'Resume'}
+      </button>
+    </div>
+  );
+}
+```
+
+### usePrevious
+
+```tsx
+function usePrevious<T>(value: T): T | undefined {
+  const ref = useRef<T>();
+
+  useEffect(() => {
+    ref.current = value;
+  }, [value]);
+
+  return ref.current;
+}
+
+// Usage
+function Counter() {
+  const [count, setCount] = useState(0);
+  const prevCount = usePrevious(count);
+
+  return (
+    <div>
+      Now: {count}, Before: {prevCount ?? 'N/A'}
+    </div>
+  );
+}
+```
+
+---
+
+## Quick Reference
+
+```tsx
+// Basic custom hook structure
+function useMyHook(param: string) {
+  const [state, setState] = useState(initialValue);
+
+  useEffect(() => {
+    // Side effect
+  }, [param]);
+
+  const action = useCallback(() => {
+    // Handler
+  }, []);
+
+  return { state, action }; // or [state, action]
+}
+
+// Testing
+const { result } = renderHook(() => useMyHook('test'));
+act(() => result.current.action());
+expect(result.current.state).toBe(expected);
+```

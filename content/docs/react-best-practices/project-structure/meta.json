@@ -1,0 +1,4 @@
+{
+  "title": "Project Structure",
+  "pages": ["file-organization", "naming-conventions", "module-boundaries", "colocation"]
+}

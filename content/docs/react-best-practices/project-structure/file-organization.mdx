@@ -1,0 +1,378 @@
+---
+title: File Organization
+description: Structuring React projects for maintainability and scalability
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## Feature-Based vs Type-Based
+
+Two main approaches to organizing your React project:
+
+### Type-Based (Group by Type)
+
+```
+src/
+├── components/
+│   ├── Button.tsx
+│   ├── Modal.tsx
+│   └── UserCard.tsx
+├── hooks/
+│   ├── useAuth.ts
+│   └── useUsers.ts
+├── services/
+│   ├── authService.ts
+│   └── userService.ts
+└── types/
+    ├── auth.ts
+    └── user.ts
+```
+
+### Feature-Based (Group by Feature)
+
+```
+src/
+├── features/
+│   ├── auth/
+│   │   ├── components/
+│   │   ├── hooks/
+│   │   ├── services/
+│   │   └── types.ts
+│   └── users/
+│       ├── components/
+│       ├── hooks/
+│       ├── services/
+│       └── types.ts
+└── shared/
+    ├── components/
+    ├── hooks/
+    └── utils/
+```
+
+### Comparison
+
+| Aspect | Type-Based | Feature-Based |
+|--------|------------|---------------|
+| **Best for** | Small projects | Medium-large projects |
+| **Discoverability** | Easy to find all hooks, all components | Easy to find everything about a feature |
+| **Scalability** | Folders grow large quickly | Scales well, features are isolated |
+| **Refactoring** | Changes span many folders | Changes localized to feature folder |
+| **Team collaboration** | Merge conflicts in shared folders | Teams own features independently |
+
+<Callout type="info" title="Recommendation">
+Start with type-based for small projects. Switch to feature-based when you have 3+ distinct features or multiple developers.
+</Callout>
+
+---
+
+## Flat vs Nested
+
+### Flat Structure
+
+```
+src/features/users/
+├── UserList.tsx
+├── UserCard.tsx
+├── UserForm.tsx
+├── useUsers.ts
+├── useUserForm.ts
+├── userService.ts
+└── types.ts
+```
+
+### Nested Structure
+
+```
+src/features/users/
+├── components/
+│   ├── UserList.tsx
+│   ├── UserCard.tsx
+│   └── UserForm.tsx
+├── hooks/
+│   ├── useUsers.ts
+│   └── useUserForm.ts
+├── services/
+│   └── userService.ts
+└── types.ts
+```
+
+### When to Use Each
+
+| Flat | Nested |
+|------|--------|
+| Feature has  files | Feature has 10+ files |
+| Quick navigation | Organized by responsibility |
+| Less nesting to navigate | Clear boundaries |
+
+---
+
+## Component Folder Structure
+
+For components with multiple related files:
+
+```
+src/components/
+├── Button/
+│   ├── Button.tsx          # Main component
+│   ├── Button.test.tsx     # Tests
+│   ├── Button.module.css   # Styles
+│   ├── Button.stories.tsx  # Storybook (optional)
+│   └── index.ts            # Re-export
+└── DataTable/
+    ├── DataTable.tsx
+    ├── DataTableHeader.tsx
+    ├── DataTableRow.tsx
+    ├── DataTable.test.tsx
+    ├── DataTable.module.css
+    └── index.ts
+```
+
+### index.ts Pattern
+
+```tsx
+// Button/index.ts
+export { Button } from './Button';
+export type { ButtonProps } from './Button';
+```
+
+This enables clean imports:
+
+```tsx
+// Consumer
+import { Button } from '@/components/Button';
+```
+
+<Callout type="warn" title="Avoid">
+Don't create component folders for simple components with just one file. Use folders only when you have styles, tests, or sub-components.
+</Callout>
+
+---
+
+## Shared vs Feature-Specific
+
+### Shared Code (`src/shared/`)
+
+Code used across multiple features:
+
+```
+src/shared/
+├── components/      # Button, Modal, Card, etc.
+├── hooks/          # useDebounce, useLocalStorage
+├── utils/          # formatDate, cn, etc.
+├── types/          # Common types
+└── constants/      # App-wide constants
+```
+
+### Feature-Specific Code
+
+Code used only within one feature stays in that feature:
+
+```
+src/features/checkout/
+├── components/
+│   └── CheckoutStepper.tsx   # Only used in checkout
+├── hooks/
+│   └── useCheckoutState.ts   # Only used in checkout
+└── utils/
+    └── calculateTotals.ts    # Only used in checkout
+```
+
+### Migration Rule
+
+```
+Feature-specific → Used by 2+ features → Move to shared/
+```
+
+<Callout type="info" title="Principle">
+Don't pre-optimize. Keep code in features until you have a concrete second use case. Moving to shared adds coupling.
+</Callout>
+
+---
+
+## Index Files (Barrel Files)
+
+### Purpose
+
+Consolidate exports for cleaner imports:
+
+```tsx
+// features/users/index.ts
+export { UserList } from './components/UserList';
+export { UserCard } from './components/UserCard';
+export { useUsers } from './hooks/useUsers';
+export type { User, UserRole } from './types';
+```
+
+### Consumption
+
+```tsx
+// Clean imports from feature
+import { UserList, useUsers, type User } from '@/features/users';
+```
+
+### Vite Configuration
+
+Set up path aliases in `vite.config.ts`:
+
+```tsx
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+import path from 'path';
+
+export default defineConfig({
+  plugins: [react()],
+  resolve: {
+    alias: {
+      '@': path.resolve(__dirname, './src'),
+    },
+  },
+});
+```
+
+And in `tsconfig.json`:
+
+```json
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"]
+    }
+  }
+}
+```
+
+<Callout type="warn" title="Barrel File Pitfalls">
+Barrel files can cause bundle size issues and circular dependencies. See [Module Boundaries](/docs/react/module-boundaries) for pros/cons.
+</Callout>
+
+---
+
+## Test File Location
+
+Two common approaches:
+
+### Colocated Tests
+
+```
+src/components/Button/
+├── Button.tsx
+└── Button.test.tsx
+```
+
+### Separate Test Directory
+
+```
+src/components/Button/
+└── Button.tsx
+
+tests/components/
+└── Button.test.tsx
+```
+
+### Comparison
+
+| Colocated | Separate |
+|-----------|----------|
+| Tests next to code | Tests isolated |
+| Easy to find related test | Clear test/source separation |
+| Encourages writing tests | Better for integration tests |
+| Works well with component folders | Mirrors src structure |
+
+<Callout type="info" title="Recommendation">
+Colocate unit tests with components. Use a separate `tests/` or `e2e/` folder for integration and end-to-end tests.
+</Callout>
+
+---
+
+## When to Split Files
+
+### Split When
+
+- Component exceeds ~200-300 lines
+- Multiple distinct responsibilities
+- Sub-components are reusable
+- File has more than 3-4 components
+
+### Before Split
+
+```tsx
+// UserProfile.tsx - 400+ lines
+function UserProfile({ userId }: Props) {
+  // Avatar logic...
+  // Stats logic...
+  // Activity feed logic...
+
+  return (
+    <div>
+      {/* Avatar section - 50 lines */}
+      {/* Stats section - 80 lines */}
+      {/* Activity feed - 150 lines */}
+    </div>
+  );
+}
+```
+
+### After Split
+
+```
+UserProfile/
+├── UserProfile.tsx        # Main component, composes others
+├── UserAvatar.tsx         # Avatar section
+├── UserStats.tsx          # Stats section
+├── UserActivityFeed.tsx   # Activity feed
+└── index.ts
+```
+
+```tsx
+// UserProfile.tsx - Now ~50 lines
+function UserProfile({ userId }: Props) {
+  const { user, stats, activity } = useUserProfile(userId);
+
+  return (
+    <div>
+      <UserAvatar user={user} />
+      <UserStats stats={stats} />
+      <UserActivityFeed items={activity} />
+    </div>
+  );
+}
+```
+
+### Don't Split When
+
+- Components are tightly coupled and only used together
+- Split would create artificial abstraction
+- Files are still readable and focused
+
+---
+
+## Recommended Structure
+
+A balanced approach for most React + Vite projects:
+
+```
+src/
+├── app/                    # App shell, routing, providers
+│   ├── App.tsx
+│   ├── routes.tsx
+│   └── providers.tsx
+├── features/               # Feature modules
+│   ├── auth/
+│   │   ├── components/
+│   │   ├── hooks/
+│   │   ├── services/
+│   │   ├── types.ts
+│   │   └── index.ts
+│   └── dashboard/
+│       └── ...
+├── shared/                 # Shared utilities
+│   ├── components/
+│   ├── hooks/
+│   ├── utils/
+│   └── types/
+├── assets/                 # Static assets
+│   ├── images/
+│   └── fonts/
+└── main.tsx               # Entry point
+```

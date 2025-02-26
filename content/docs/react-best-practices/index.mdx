@@ -1,0 +1,184 @@
+---
+title: Introduction
+description: A comprehensive guide to modern React development with TypeScript
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+## About This Guide
+
+This guide provides a **comprehensive**, **practical**, and **production-ready** approach to React development. It covers everything from fundamentals to advanced patterns, with a focus on modern best practices and TypeScript integration.
+
+> **Writing principles:** Each topic is self-contained, uses direct language, includes practical examples, and emphasizes real-world usage patterns.
+
+---
+
+## Who This Guide Is For
+
+### Target Audience
+
+- Developers learning React or transitioning from other frameworks
+- Engineers building production React applications
+- Teams establishing React development standards
+- Developers preparing for React interviews
+
+### What You'll Learn
+
+This guide will teach you to:
+
+- Build React applications with confidence
+- Write maintainable, testable components
+- Apply modern React patterns effectively
+- Optimize application performance
+- Implement accessibility best practices
+- Structure scalable React projects
+
+---
+
+## Prerequisites
+
+### Required Knowledge
+
+| Category          | Topics                                                               |
+| ----------------- | -------------------------------------------------------------------- |
+| JavaScript        | ES6+ syntax, destructuring, spread operators, async/await, modules   |
+| TypeScript        | Basic types, interfaces, generics (we'll cover React-specific usage) |
+| Web Fundamentals  | HTML, CSS, DOM manipulation, HTTP basics                             |
+| Development Tools | npm/yarn/pnpm, Git, terminal basics                                  |
+
+### Recommended Setup
+
+| Tool                | Requirement                                   |
+| ------------------- | --------------------------------------------- |
+| **Node.js**         | Version 18+ (LTS recommended)                 |
+| **Editor**          | VS Code or equivalent with TypeScript support |
+| **Browser**         | Chrome/Firefox with React DevTools extension  |
+| **Package Manager** | npm, yarn, or pnpm                            |
+
+---
+
+## What's Covered
+
+### Core Topics
+
+- **Fundamentals:** Components, JSX, props, state, and events
+- **Hooks:** useState, useEffect, useContext, custom hooks, and advanced patterns
+- **TypeScript:** Typing components, props, hooks, and complex patterns
+- **State Management:** Context, Zustand, Redux patterns, and when to use each
+- **Performance:** Memoization, lazy loading, code splitting, and optimization techniques
+- **Data Fetching:** REST APIs, GraphQL, caching, error handling, loading states
+- **Forms:** Controlled components, validation, complex forms, form libraries
+- **Testing:** Unit tests, integration tests, testing patterns with React Testing Library
+- **Accessibility:** ARIA, keyboard navigation, screen reader support
+- **Project Structure:** File organization, module patterns, scaling strategies
+
+### Advanced Topics
+
+- Effects and lifecycle management
+- Concurrent React features
+- Portals and overlays
+- DOM refs and imperative APIs
+- Security considerations
+- Common anti-patterns to avoid
+
+---
+
+## What's Not Covered
+
+### Out of Scope
+
+- **Beginner programming:** Basic JavaScript, programming fundamentals, or web basics
+- **Framework deep-dives:** Complete Next.js, Remix, or Gatsby courses (we reference them but don't replace their docs)
+- **Build tool configuration:** Webpack, Vite, or bundler internals (we use standard setups)
+- **Backend development:** API implementation, databases, or server-side logic
+
+### Not a Replacement For
+
+- Official React documentation
+- Framework-specific documentation
+- Library-specific guides
+- Team coding standards
+
+---
+
+## Code Conventions
+
+### Example Standards
+
+| Convention         | Approach                                                     |
+| ------------------ | ------------------------------------------------------------ |
+| **Language**       | TypeScript by default                                        |
+| **Components**     | Function components with hooks                               |
+| **Naming**         | PascalCase for components, camelCase for functions/variables |
+| **File structure** | One component per file, colocated tests                      |
+| **Imports**        | Explicit imports, organized by external/internal             |
+
+### Component Patterns
+
+- Use function components with TypeScript interfaces for props
+- Prefer composition over inheritance
+- Extract reusable logic into custom hooks
+- Keep components focused and single-purpose
+
+### Example Component
+
+```tsx
+interface ButtonProps {
+  children: React.ReactNode;
+  onClick?: () => void;
+  variant?: "primary" | "secondary";
+  disabled?: boolean;
+}
+
+export function Button({
+  children,
+  onClick,
+  variant = "primary",
+  disabled = false,
+}: ButtonProps) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className={`btn btn-${variant}`}
+    >
+      {children}
+    </button>
+  );
+}
+```
+
+---
+
+## How to Use This Guide
+
+### Learning Path
+
+1. **Start with Fundamentals** - Build a strong foundation
+2. **Learn Hooks** - Master React's core API
+3. **Add TypeScript** - Write type-safe components
+4. **Explore State Management** - Handle complex application state
+5. **Optimize Performance** - Build fast, efficient applications
+6. **Master Testing** - Write reliable, maintainable tests
+7. **Deep Dive** - Explore advanced topics as needed
+
+### For Experienced Developers
+
+If you're already familiar with React basics:
+
+- Skip directly to topics you need
+- Use the guide as a reference
+- Focus on advanced patterns and best practices
+- Review TypeScript integration patterns
+
+---
+
+## Contributing
+
+Found an issue or have a suggestion? This guide is continuously improved based on real-world usage and community feedback.
+
+<Callout type="info">
+  Each section includes practical examples, common pitfalls, and
+  production-ready patterns. Code examples are tested and follow modern React
+  best practices.
+</Callout>

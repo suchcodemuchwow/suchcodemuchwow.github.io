@@ -1,0 +1,554 @@
+---
+title: Discriminated Unions for Props
+description: Using TypeScript discriminated unions to create type-safe conditional props in React components.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## Overview
+
+Discriminated unions (also called tagged unions) allow you to create props that change based on a discriminant property. This pattern ensures type safety when different prop combinations are required for different component variants.
+
+## Basic Pattern
+
+A discriminated union requires:
+1. A common property (the discriminant) with literal types
+2. Different property shapes for each variant
+
+```tsx
+type ButtonProps =
+  | { variant: 'solid'; color: string }
+  | { variant: 'outline'; borderWidth: number }
+  | { variant: 'ghost' };
+
+function Button(props: ButtonProps) {
+  switch (props.variant) {
+    case 'solid':
+      return <button style={{ backgroundColor: props.color }}>Solid</button>;
+    case 'outline':
+      return <button style={{ borderWidth: props.borderWidth }}>Outline</button>;
+    case 'ghost':
+      return <button style={{ background: 'transparent' }}>Ghost</button>;
+  }
+}
+
+// Usage - TypeScript enforces correct props for each variant
+<Button variant="solid" color="blue" />
+<Button variant="outline" borderWidth={2} />
+<Button variant="ghost" />
+
+// Error: Property 'color' does not exist on variant 'ghost'
+<Button variant="ghost" color="red" />
+```
+
+## Common Prop Patterns
+
+### Link vs Button
+
+```tsx
+type ActionProps =
+  | {
+      as: 'button';
+      onClick: () => void;
+      disabled?: boolean;
+      type?: 'button' | 'submit' | 'reset';
+    }
+  | {
+      as: 'link';
+      href: string;
+      target?: '_blank' | '_self';
+      rel?: string;
+    };
+
+interface BaseActionProps {
+  children: React.ReactNode;
+  className?: string;
+}
+
+function Action(props: BaseActionProps & ActionProps) {
+  const { children, className } = props;
+
+  if (props.as === 'link') {
+    return (
+      <a
+        href={props.href}
+        target={props.target}
+        rel={props.rel}
+        className={className}
+      >
+        {children}
+      </a>
+    );
+  }
+
+  return (
+    <button
+      onClick={props.onClick}
+      disabled={props.disabled}
+      type={props.type}
+      className={className}
+    >
+      {children}
+    </button>
+  );
+}
+
+// Usage
+<Action as="button" onClick={() => console.log('clicked')}>
+  Click me
+</Action>
+
+<Action as="link" href="/about" target="_blank">
+  Learn more
+</Action>
+```
+
+### Loading States
+
+```tsx
+type AsyncDataProps<T> =
+  | { status: 'idle' }
+  | { status: 'loading' }
+  | { status: 'error'; error: Error; retry: () => void }
+  | { status: 'success'; data: T };
+
+function DataDisplay<T>({
+  asyncData,
+  renderData,
+}: {
+  asyncData: AsyncDataProps<T>;
+  renderData: (data: T) => React.ReactNode;
+}) {
+  switch (asyncData.status) {
+    case 'idle':
+      return <div>Ready to load</div>;
+    case 'loading':
+      return <div>Loading...</div>;
+    case 'error':
+      return (
+        <div>
+          <p>Error: {asyncData.error.message}</p>
+          <button onClick={asyncData.retry}>Retry</button>
+        </div>
+      );
+    case 'success':
+      return <>{renderData(asyncData.data)}</>;
+  }
+}
+```
+
+## Conditional Required Props
+
+### With vs Without Callback
+
+```tsx
+type ModalProps =
+  | {
+      dismissible: true;
+      onDismiss: () => void;
+    }
+  | {
+      dismissible?: false;
+      onDismiss?: never;
+    };
+
+interface BaseModalProps {
+  title: string;
+  children: React.ReactNode;
+}
+
+function Modal(props: BaseModalProps & ModalProps) {
+  return (
+    <div className="modal">
+      <header>
+        <h2>{props.title}</h2>
+        {props.dismissible && (
+          <button onClick={props.onDismiss} aria-label="Close">
+            X
+          </button>
+        )}
+      </header>
+      <div className="modal-body">{props.children}</div>
+    </div>
+  );
+}
+
+// Valid
+<Modal title="Welcome" dismissible onDismiss={() => setOpen(false)}>
+  Content
+</Modal>
+
+<Modal title="Alert">
+  Content
+</Modal>
+
+// Error: onDismiss required when dismissible is true
+<Modal title="Error" dismissible>
+  Content
+</Modal>
+```
+
+<Callout type="info">
+Using `never` for excluded props ensures they cannot be passed when the discriminant doesn't require them.
+</Callout>
+
+## Complex Discriminated Unions
+
+### Multi-level Discrimination
+
+```tsx
+type NotificationProps =
+  | {
+      type: 'toast';
+      position: 'top' | 'bottom';
+      duration: number;
+      message: string;
+    }
+  | {
+      type: 'banner';
+      sticky: boolean;
+      message: string;
+      action?: {
+        label: string;
+        onClick: () => void;
+      };
+    }
+  | {
+      type: 'modal';
+      title: string;
+      message: string;
+      confirmLabel: string;
+      onConfirm: () => void;
+      cancelLabel?: string;
+      onCancel?: () => void;
+    };
+
+function Notification(props: NotificationProps) {
+  switch (props.type) {
+    case 'toast':
+      return (
+        <div className={`toast toast-${props.position}`}>
+          {props.message}
+        </div>
+      );
+    case 'banner':
+      return (
+        <div className={`banner ${props.sticky ? 'sticky' : ''}`}>
+          <span>{props.message}</span>
+          {props.action && (
+            <button onClick={props.action.onClick}>
+              {props.action.label}
+            </button>
+          )}
+        </div>
+      );
+    case 'modal':
+      return (
+        <div className="modal-notification">
+          <h3>{props.title}</h3>
+          <p>{props.message}</p>
+          <div className="actions">
+            {props.cancelLabel && (
+              <button onClick={props.onCancel}>{props.cancelLabel}</button>
+            )}
+            <button onClick={props.onConfirm}>{props.confirmLabel}</button>
+          </div>
+        </div>
+      );
+  }
+}
+```
+
+### Form Field Variants
+
+```tsx
+type TextFieldProps = {
+  type: 'text' | 'email' | 'password';
+  maxLength?: number;
+  pattern?: string;
+};
+
+type NumberFieldProps = {
+  type: 'number';
+  min?: number;
+  max?: number;
+  step?: number;
+};
+
+type SelectFieldProps = {
+  type: 'select';
+  options: Array<{ value: string; label: string }>;
+  multiple?: boolean;
+};
+
+type CheckboxFieldProps = {
+  type: 'checkbox';
+  checked: boolean;
+};
+
+type FormFieldProps = {
+  name: string;
+  label: string;
+  required?: boolean;
+  onChange: (value: unknown) => void;
+} & (TextFieldProps | NumberFieldProps | SelectFieldProps | CheckboxFieldProps);
+
+function FormField(props: FormFieldProps) {
+  const { name, label, required } = props;
+
+  switch (props.type) {
+    case 'text':
+    case 'email':
+    case 'password':
+      return (
+        <div className="form-field">
+          <label htmlFor={name}>{label}</label>
+          <input
+            id={name}
+            type={props.type}
+            maxLength={props.maxLength}
+            pattern={props.pattern}
+            required={required}
+          />
+        </div>
+      );
+
+    case 'number':
+      return (
+        <div className="form-field">
+          <label htmlFor={name}>{label}</label>
+          <input
+            id={name}
+            type="number"
+            min={props.min}
+            max={props.max}
+            step={props.step}
+            required={required}
+          />
+        </div>
+      );
+
+    case 'select':
+      return (
+        <div className="form-field">
+          <label htmlFor={name}>{label}</label>
+          <select id={name} multiple={props.multiple} required={required}>
+            {props.options.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        </div>
+      );
+
+    case 'checkbox':
+      return (
+        <div className="form-field">
+          <label>
+            <input
+              type="checkbox"
+              name={name}
+              checked={props.checked}
+              required={required}
+            />
+            {label}
+          </label>
+        </div>
+      );
+  }
+}
+```
+
+## Exhaustiveness Checking
+
+Ensure all union variants are handled.
+
+```tsx
+type Status = 'pending' | 'approved' | 'rejected' | 'archived';
+
+function assertNever(value: never): never {
+  throw new Error(`Unhandled value: ${value}`);
+}
+
+function StatusBadge({ status }: { status: Status }) {
+  switch (status) {
+    case 'pending':
+      return <span className="badge yellow">Pending</span>;
+    case 'approved':
+      return <span className="badge green">Approved</span>;
+    case 'rejected':
+      return <span className="badge red">Rejected</span>;
+    case 'archived':
+      return <span className="badge gray">Archived</span>;
+    default:
+      return assertNever(status);
+  }
+}
+```
+
+<Callout type="warn">
+Adding `assertNever` in the default case ensures TypeScript will error if you add a new status but forget to handle it.
+</Callout>
+
+## Pros and Cons
+
+### Discriminated Unions
+
+| Pros | Cons |
+|------|------|
+| Type-safe prop combinations | More complex type definitions |
+| IDE autocomplete per variant | Steeper learning curve |
+| Compile-time validation | Verbose for simple cases |
+| Self-documenting API | Requires switch/if narrowing |
+| Impossible states prevented | Can be hard to read |
+
+### Optional Props Alternative
+
+| Pros | Cons |
+|------|------|
+| Simpler type definitions | Invalid combinations possible |
+| Easier to understand | Runtime checks needed |
+| Less boilerplate | No IDE guidance per variant |
+| Familiar pattern | Implicit relationships |
+
+## When to Use
+
+| Scenario | Use Discriminated Unions |
+|----------|--------------------------|
+| Mutually exclusive prop sets | Yes |
+| Component with distinct modes | Yes |
+| Props that depend on other props | Yes |
+| Polymorphic components (as prop) | Yes |
+| State machines in props | Yes |
+| Complex conditional rendering | Yes |
+
+## When NOT to Use
+
+| Scenario | Reason |
+|----------|--------|
+| Simple optional props | Over-engineering |
+| Independent boolean flags | No relationship exists |
+| 2-3 variants with identical props | Use optional props |
+| Props always needed together | Use required props |
+
+## Type Guards
+
+Custom type guards for complex narrowing.
+
+```tsx
+type UploadProps =
+  | { source: 'file'; file: File }
+  | { source: 'url'; url: string }
+  | { source: 'base64'; data: string; mimeType: string };
+
+function isFileUpload(props: UploadProps): props is { source: 'file'; file: File } {
+  return props.source === 'file';
+}
+
+function isUrlUpload(props: UploadProps): props is { source: 'url'; url: string } {
+  return props.source === 'url';
+}
+
+function Upload(props: UploadProps) {
+  if (isFileUpload(props)) {
+    return <div>Uploading file: {props.file.name}</div>;
+  }
+
+  if (isUrlUpload(props)) {
+    return <div>Fetching from: {props.url}</div>;
+  }
+
+  // TypeScript knows this is base64
+  return <div>Processing {props.mimeType} data</div>;
+}
+```
+
+## Combining with Generics
+
+```tsx
+type DataSourceProps<T> =
+  | { source: 'static'; data: T[] }
+  | { source: 'async'; loadData: () => Promise<T[]> }
+  | { source: 'paginated'; loadPage: (page: number) => Promise<T[]>; pageSize: number };
+
+interface DataListProps<T> {
+  dataSource: DataSourceProps<T>;
+  renderItem: (item: T) => React.ReactNode;
+  keyExtractor: (item: T) => string;
+}
+
+function DataList<T>({ dataSource, renderItem, keyExtractor }: DataListProps<T>) {
+  const [items, setItems] = useState<T[]>([]);
+
+  useEffect(() => {
+    if (dataSource.source === 'static') {
+      setItems(dataSource.data);
+    } else if (dataSource.source === 'async') {
+      dataSource.loadData().then(setItems);
+    }
+    // Paginated would have its own logic
+  }, [dataSource]);
+
+  return (
+    <ul>
+      {items.map((item) => (
+        <li key={keyExtractor(item)}>{renderItem(item)}</li>
+      ))}
+    </ul>
+  );
+}
+
+// Usage
+<DataList<User>
+  dataSource={{ source: 'static', data: users }}
+  renderItem={(user) => <span>{user.name}</span>}
+  keyExtractor={(user) => user.id}
+/>
+
+<DataList<Product>
+  dataSource={{
+    source: 'async',
+    loadData: () => fetch('/api/products').then((r) => r.json()),
+  }}
+  renderItem={(product) => <span>{product.name}</span>}
+  keyExtractor={(product) => product.id}
+/>
+```
+
+## Best Practices
+
+1. **Use literal types** for discriminants (strings, numbers, booleans)
+2. **Keep discriminant names consistent** (`type`, `variant`, `kind`, `as`)
+3. **Use `never`** for props that shouldn't exist in certain variants
+4. **Add exhaustiveness checking** with `assertNever`
+5. **Document each variant** with JSDoc comments
+6. **Extract common props** to a base interface
+
+```tsx
+/** Base props shared by all alert variants */
+interface BaseAlertProps {
+  /** Alert message to display */
+  message: string;
+  /** Additional CSS classes */
+  className?: string;
+}
+
+/**
+ * Alert component with dismissible and timed variants.
+ *
+ * @example
+ * // Dismissible alert
+ * <Alert variant="dismissible" message="Hello" onDismiss={() => {}} />
+ *
+ * @example
+ * // Auto-dismiss alert
+ * <Alert variant="timed" message="Saved!" duration={3000} />
+ */
+type AlertProps = BaseAlertProps &
+  (
+    | { variant: 'static' }
+    | { variant: 'dismissible'; onDismiss: () => void }
+    | { variant: 'timed'; duration: number; onExpire?: () => void }
+  );
+```

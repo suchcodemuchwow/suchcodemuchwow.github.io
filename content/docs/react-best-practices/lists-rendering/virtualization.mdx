@@ -1,0 +1,515 @@
+---
+title: Virtualization
+description: Efficiently rendering large lists with windowing techniques
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## What is Virtualization?
+
+Virtualization (also called "windowing") renders only the visible items in a list plus a small buffer. Instead of creating DOM nodes for thousands of items, you create nodes only for what's on screen.
+
+```
+Without virtualization (1000 items):
+┌─────────────────┐
+│ Item 1          │ ← DOM node
+│ Item 2          │ ← DOM node
+│ ...             │
+│ Item 1000       │ ← DOM node (1000 total nodes)
+└─────────────────┘
+
+With virtualization (1000 items, 10 visible):
+┌─────────────────┐
+│ [spacer 450px]  │ ← Single div
+│ Item 11         │ ← DOM node
+│ Item 12         │ ← DOM node
+│ ...             │
+│ Item 20         │ ← DOM node (10 total nodes)
+│ [spacer 4500px] │ ← Single div
+└─────────────────┘
+```
+
+---
+
+## When to Virtualize
+
+| List Size | Virtualize? | Reason |
+|-----------|-------------|--------|
+| < 100 items | No | Overhead not worth it |
+| 100-500 items | Maybe | Test performance first |
+| 500-1000 items | Probably | Noticeable lag likely |
+| > 1000 items | Yes | Significant performance gain |
+| Any size with complex items | Maybe | If items cause jank |
+
+### Signs You Need Virtualization
+
+- Scrolling feels janky or choppy
+- Initial render takes > 100ms
+- Memory usage grows with list size
+- Mobile devices struggle
+- Browser dev tools show long "Recalculate Style" times
+
+<Callout type="info" title="Measure First">
+Profile your list before adding virtualization. Simple lists of 500+ items might perform fine. Complex items with event handlers might need virtualization at 50 items.
+</Callout>
+
+---
+
+## Basic Windowing Implementation
+
+A minimal virtualized list implementation:
+
+```tsx
+interface VirtualListProps<T> {
+  items: T[];
+  itemHeight: number;
+  containerHeight: number;
+  renderItem: (item: T, index: number) => ReactNode;
+  overscan?: number;
+}
+
+function VirtualList<T>({
+  items,
+  itemHeight,
+  containerHeight,
+  renderItem,
+  overscan = 3,
+}: VirtualListProps<T>) {
+  const [scrollTop, setScrollTop] = useState(0);
+
+  const totalHeight = items.length * itemHeight;
+  const visibleCount = Math.ceil(containerHeight / itemHeight);
+
+  const startIndex = Math.max(0, Math.floor(scrollTop / itemHeight) - overscan);
+  const endIndex = Math.min(
+    items.length,
+    startIndex + visibleCount + 2 * overscan
+  );
+
+  const visibleItems = items.slice(startIndex, endIndex);
+  const offsetY = startIndex * itemHeight;
+
+  const handleScroll = (e: UIEvent<HTMLDivElement>) => {
+    setScrollTop(e.currentTarget.scrollTop);
+  };
+
+  return (
+    <div
+      style={{ height: containerHeight, overflow: 'auto' }}
+      onScroll={handleScroll}
+    >
+      <div style={{ height: totalHeight, position: 'relative' }}>
+        <div
+          style={{
+            position: 'absolute',
+            top: offsetY,
+            left: 0,
+            right: 0,
+          }}
+        >
+          {visibleItems.map((item, index) => (
+            <div key={startIndex + index} style={{ height: itemHeight }}>
+              {renderItem(item, startIndex + index)}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+```
+
+### Usage
+
+```tsx
+interface User {
+  id: string;
+  name: string;
+}
+
+function UserList({ users }: { users: User[] }) {
+  return (
+    <VirtualList
+      items={users}
+      itemHeight={50}
+      containerHeight={400}
+      renderItem={(user) => (
+        <div className="user-row">
+          <span>{user.name}</span>
+        </div>
+      )}
+    />
+  );
+}
+```
+
+---
+
+## Fixed vs Variable Heights
+
+### Fixed Height
+
+Simpler and more performant:
+
+```tsx
+// Each item is exactly 50px
+<VirtualList itemHeight={50} />
+```
+
+| Pros | Cons |
+|------|------|
+| Simple math | Content might truncate |
+| Fast scroll position | Less flexible design |
+| Predictable layout | Wasted space |
+
+### Variable Height
+
+More complex but flexible:
+
+```tsx
+interface VariableHeightListProps<T> {
+  items: T[];
+  estimatedItemHeight: number;
+  containerHeight: number;
+  renderItem: (item: T, index: number) => ReactNode;
+}
+
+function VariableHeightList<T>({
+  items,
+  estimatedItemHeight,
+  containerHeight,
+  renderItem,
+}: VariableHeightListProps<T>) {
+  const [measuredHeights, setMeasuredHeights] = useState<Map<number, number>>(
+    new Map()
+  );
+  const [scrollTop, setScrollTop] = useState(0);
+
+  // Calculate positions based on measured or estimated heights
+  const getItemOffset = (index: number): number => {
+    let offset = 0;
+    for (let i = 0; i < index; i++) {
+      offset += measuredHeights.get(i) ?? estimatedItemHeight;
+    }
+    return offset;
+  };
+
+  const getTotalHeight = (): number => {
+    let total = 0;
+    for (let i = 0; i < items.length; i++) {
+      total += measuredHeights.get(i) ?? estimatedItemHeight;
+    }
+    return total;
+  };
+
+  // Find visible range
+  const findStartIndex = (): number => {
+    let offset = 0;
+    for (let i = 0; i < items.length; i++) {
+      const height = measuredHeights.get(i) ?? estimatedItemHeight;
+      if (offset + height > scrollTop) return i;
+      offset += height;
+    }
+    return 0;
+  };
+
+  const measureRef = useCallback(
+    (index: number) => (node: HTMLDivElement | null) => {
+      if (node) {
+        const height = node.getBoundingClientRect().height;
+        setMeasuredHeights((prev) => {
+          if (prev.get(index) === height) return prev;
+          const next = new Map(prev);
+          next.set(index, height);
+          return next;
+        });
+      }
+    },
+    []
+  );
+
+  const startIndex = findStartIndex();
+  const visibleItems: Array<{ item: T; index: number }> = [];
+  let currentOffset = getItemOffset(startIndex);
+
+  for (let i = startIndex; i < items.length; i++) {
+    if (currentOffset > scrollTop + containerHeight) break;
+    visibleItems.push({ item: items[i], index: i });
+    currentOffset += measuredHeights.get(i) ?? estimatedItemHeight;
+  }
+
+  return (
+    <div
+      style={{ height: containerHeight, overflow: 'auto' }}
+      onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
+    >
+      <div style={{ height: getTotalHeight(), position: 'relative' }}>
+        {visibleItems.map(({ item, index }) => (
+          <div
+            key={index}
+            ref={measureRef(index)}
+            style={{
+              position: 'absolute',
+              top: getItemOffset(index),
+              left: 0,
+              right: 0,
+            }}
+          >
+            {renderItem(item, index)}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+```
+
+<Callout type="warn" title="Complexity Warning">
+Variable height virtualization is significantly more complex. Use fixed heights when possible, or consider a battle-tested library.
+</Callout>
+
+---
+
+## Scroll Position Restoration
+
+### Basic Restoration
+
+```tsx
+function useScrollRestoration(key: string) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const storageKey = `scroll-${key}`;
+
+  useEffect(() => {
+    // Restore on mount
+    const saved = sessionStorage.getItem(storageKey);
+    if (saved && scrollRef.current) {
+      scrollRef.current.scrollTop = parseInt(saved, 10);
+    }
+
+    // Save on unmount
+    return () => {
+      if (scrollRef.current) {
+        sessionStorage.setItem(
+          storageKey,
+          String(scrollRef.current.scrollTop)
+        );
+      }
+    };
+  }, [storageKey]);
+
+  return scrollRef;
+}
+
+function ProductList({ products }: { products: Product[] }) {
+  const scrollRef = useScrollRestoration('product-list');
+
+  return (
+    <div ref={scrollRef} style={{ height: 500, overflow: 'auto' }}>
+      <VirtualList items={products} /* ... */ />
+    </div>
+  );
+}
+```
+
+### With Route Changes
+
+```tsx
+function useScrollPosition(listId: string) {
+  const scrollPositions = useRef<Map<string, number>>(new Map());
+
+  const savePosition = useCallback(
+    (scrollTop: number) => {
+      scrollPositions.current.set(listId, scrollTop);
+    },
+    [listId]
+  );
+
+  const getPosition = useCallback(() => {
+    return scrollPositions.current.get(listId) ?? 0;
+  }, [listId]);
+
+  return { savePosition, getPosition };
+}
+```
+
+---
+
+## Search in Virtualized Lists
+
+### Scroll to Item
+
+```tsx
+interface VirtualListRef {
+  scrollToIndex: (index: number) => void;
+}
+
+const VirtualList = forwardRef<VirtualListRef, VirtualListProps>(
+  function VirtualList({ items, itemHeight, containerHeight }, ref) {
+    const containerRef = useRef<HTMLDivElement>(null);
+
+    useImperativeHandle(ref, () => ({
+      scrollToIndex: (index: number) => {
+        if (containerRef.current) {
+          containerRef.current.scrollTop = index * itemHeight;
+        }
+      },
+    }));
+
+    // ... rest of implementation
+  }
+);
+
+// Usage with search
+function SearchableList({ items }: { items: Item[] }) {
+  const listRef = useRef<VirtualListRef>(null);
+  const [search, setSearch] = useState('');
+
+  const handleSearch = (query: string) => {
+    setSearch(query);
+    const index = items.findIndex((item) =>
+      item.name.toLowerCase().includes(query.toLowerCase())
+    );
+    if (index !== -1) {
+      listRef.current?.scrollToIndex(index);
+    }
+  };
+
+  return (
+    <div>
+      <input
+        type="search"
+        value={search}
+        onChange={(e) => handleSearch(e.target.value)}
+        placeholder="Search..."
+      />
+      <VirtualList ref={listRef} items={items} itemHeight={50} containerHeight={400} />
+    </div>
+  );
+}
+```
+
+### Highlight Matches
+
+```tsx
+function SearchableVirtualList({ items }: { items: Item[] }) {
+  const [search, setSearch] = useState('');
+
+  const matchIndices = useMemo(() => {
+    if (!search) return new Set<number>();
+    return new Set(
+      items
+        .map((item, index) => ({ item, index }))
+        .filter(({ item }) =>
+          item.name.toLowerCase().includes(search.toLowerCase())
+        )
+        .map(({ index }) => index)
+    );
+  }, [items, search]);
+
+  return (
+    <VirtualList
+      items={items}
+      itemHeight={50}
+      containerHeight={400}
+      renderItem={(item, index) => (
+        <div className={matchIndices.has(index) ? 'highlighted' : ''}>
+          {item.name}
+        </div>
+      )}
+    />
+  );
+}
+```
+
+---
+
+## Tradeoffs and Limitations
+
+### When Virtualization Helps
+
+| Scenario | Benefit |
+|----------|---------|
+| 1000+ simple items | Major render time reduction |
+| Complex item components | Less memory usage |
+| Mobile devices | Smoother scrolling |
+| Frequent re-renders | Fewer DOM updates |
+
+### When Virtualization Hurts
+
+| Scenario | Problem |
+|----------|---------|
+| SEO-critical content | Content not in DOM for crawlers |
+| Print stylesheets | Only visible items print |
+| Ctrl+F browser search | Can't find non-rendered items |
+| Accessibility | Screen readers see partial list |
+| Deep linking | Item might not be rendered |
+
+### Implementation Complexity
+
+| Feature | Fixed Height | Variable Height |
+|---------|--------------|-----------------|
+| Basic scrolling | Simple | Complex |
+| Jump to index | Trivial | Requires measurement |
+| Total height | O(1) | O(n) or cached |
+| Resize handling | None needed | Re-measure all |
+| Keyboard nav | Straightforward | Position tracking |
+
+<Callout type="warn" title="Accessibility Consideration">
+Virtualized lists can be problematic for screen readers. Consider providing an accessible alternative or using ARIA attributes to communicate list length and position.
+</Callout>
+
+---
+
+## Alternatives to Virtualization
+
+| Approach | Best For | Tradeoff |
+|----------|----------|----------|
+| Pagination | Discrete pages of content | User must click through |
+| Infinite scroll | Feed-like content | Memory grows over time |
+| Virtualization | Long scrollable lists | Implementation complexity |
+| Search/filter | Large datasets | Requires user action |
+| Lazy rendering | Below-fold content | Initial empty space |
+
+### When to Use Each
+
+```tsx
+// Pagination: when users want specific pages
+<Pagination totalItems={1000} pageSize={20} />
+
+// Infinite scroll: when browsing is exploratory
+<InfiniteScroll loadMore={fetchNextPage} />
+
+// Virtualization: when full list must be scrollable
+<VirtualList items={allItems} />
+
+// Filter: when users know what they want
+<FilterableList items={items} onFilter={setFilter} />
+```
+
+---
+
+## Quick Reference
+
+```tsx
+// Basic virtual list structure
+<div style={{ height: containerHeight, overflow: 'auto' }}>
+  <div style={{ height: totalHeight, position: 'relative' }}>
+    <div style={{ transform: `translateY(${offsetY}px)` }}>
+      {visibleItems.map(item => <Item key={item.id} />)}
+    </div>
+  </div>
+</div>
+
+// Key calculations
+const visibleCount = Math.ceil(containerHeight / itemHeight);
+const startIndex = Math.floor(scrollTop / itemHeight);
+const offsetY = startIndex * itemHeight;
+const endIndex = startIndex + visibleCount + overscan;
+```
+
+| Term | Definition |
+|------|------------|
+| Windowing | Rendering only visible items |
+| Overscan | Extra items rendered above/below viewport |
+| Offset | Spacer to maintain scroll position |
+| Measurement | Determining actual item heights |

@@ -1,0 +1,311 @@
+---
+title: Lifting State Up
+description: Sharing state between components by moving it to a common ancestor
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## When to Lift State
+
+Lift state when multiple components need to:
+
+- Read the same data
+- Stay synchronized
+- Respond to each other's changes
+
+```tsx
+// Before: each component has its own state
+function TemperatureInput() {
+  const [celsius, setCelsius] = useState(0); // Can't share with Fahrenheit
+}
+
+// After: lifted to parent
+function TemperatureConverter() {
+  const [celsius, setCelsius] = useState(0);
+
+  return (
+    <>
+      <CelsiusInput value={celsius} onChange={setCelsius} />
+      <FahrenheitInput
+        value={celsius * 9/5 + 32}
+        onChange={f => setCelsius((f - 32) * 5/9)}
+      />
+    </>
+  );
+}
+```
+
+---
+
+## Finding the Common Ancestor
+
+The right level is the **lowest** component that:
+1. Contains all components needing the state
+2. Makes sense as the "owner" of that data
+
+```
+         App
+          │
+    ┌─────┴─────┐
+    │           │
+  Header     MainContent
+    │           │
+ UserMenu   ┌───┴───┐
+            │       │
+        Sidebar   Content
+            │       │
+       FilterPanel ProductList
+                    │
+                ProductCard
+```
+
+| Shared Between | Lift To |
+|----------------|---------|
+| FilterPanel + ProductList | MainContent |
+| Sidebar + Content | MainContent |
+| Header + MainContent | App |
+| UserMenu + Content | App |
+
+```tsx
+// Filter state shared between FilterPanel and ProductList
+function MainContent() {
+  const [filters, setFilters] = useState<Filters>({ category: null, price: null });
+
+  return (
+    <div className="main">
+      <Sidebar>
+        <FilterPanel filters={filters} onChange={setFilters} />
+      </Sidebar>
+      <Content>
+        <ProductList filters={filters} />
+      </Content>
+    </div>
+  );
+}
+```
+
+---
+
+## Prop Drilling Management
+
+When lifted state must pass through intermediate components:
+
+### The Problem
+
+```tsx
+// State lifted to App
+function App() {
+  const [user, setUser] = useState<User | null>(null);
+
+  return (
+    <Layout user={user} onLogout={() => setUser(null)}>  {/* pass through */}
+      <Dashboard user={user} onLogout={() => setUser(null)}>  {/* pass through */}
+        <Header user={user} onLogout={() => setUser(null)}>  {/* pass through */}
+          <UserMenu user={user} onLogout={() => setUser(null)} />  {/* actual consumer */}
+        </Header>
+      </Dashboard>
+    </Layout>
+  );
+}
+```
+
+### Solution 1: Flatten the Hierarchy
+
+```tsx
+function App() {
+  const [user, setUser] = useState<User | null>(null);
+
+  // Lift the consuming component to where the state is
+  return (
+    <Layout
+      header={<Header userMenu={<UserMenu user={user} onLogout={() => setUser(null)} />} />}
+    >
+      <Dashboard user={user} />
+    </Layout>
+  );
+}
+```
+
+### Solution 2: Component Composition
+
+Pass the fully-configured component as a prop:
+
+```tsx
+function App() {
+  const [user, setUser] = useState<User | null>(null);
+
+  const userMenu = <UserMenu user={user} onLogout={() => setUser(null)} />;
+
+  return (
+    <Layout>
+      <Dashboard userMenuSlot={userMenu}>
+        <Content />
+      </Dashboard>
+    </Layout>
+  );
+}
+
+function Dashboard({ userMenuSlot, children }: Props) {
+  return (
+    <div>
+      <Header>{userMenuSlot}</Header>
+      {children}
+    </div>
+  );
+}
+```
+
+<Callout type="info" title="Rule of Thumb">
+If you're passing props through 3+ levels, consider composition or context.
+</Callout>
+
+---
+
+## Lifting Too High (Anti-Pattern)
+
+### Signs You've Lifted Too High
+
+| Symptom | Problem |
+|---------|---------|
+| Many unrelated components re-render | State changes trigger wide updates |
+| Props pass through many layers | Unnecessary coupling |
+| State feels "far" from its usage | Hard to trace data flow |
+| Hard to understand what owns what | Confusing ownership |
+
+### Example: Over-Lifted State
+
+```tsx
+// Bad: modal state lifted to App, but only ProductPage uses it
+function App() {
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [modalProductId, setModalProductId] = useState<string | null>(null);
+
+  return (
+    <Router>
+      <Route path="/" element={<HomePage />} />
+      <Route
+        path="/products"
+        element={
+          <ProductPage
+            isModalOpen={isModalOpen}
+            modalProductId={modalProductId}
+            onOpenModal={setModalProductId}
+            onCloseModal={() => setIsModalOpen(false)}
+          />
+        }
+      />
+      <Route path="/about" element={<AboutPage />} />
+    </Router>
+  );
+}
+```
+
+```tsx
+// Good: state stays in ProductPage
+function ProductPage() {
+  const [modalProductId, setModalProductId] = useState<string | null>(null);
+
+  return (
+    <div>
+      <ProductList onSelectProduct={setModalProductId} />
+      {modalProductId && (
+        <ProductModal
+          productId={modalProductId}
+          onClose={() => setModalProductId(null)}
+        />
+      )}
+    </div>
+  );
+}
+```
+
+---
+
+## Alternative: Composition Pattern
+
+Instead of lifting state, restructure components to keep state local:
+
+### Before: Lifting Required
+
+```tsx
+function Parent() {
+  // Forced to lift because Child1 and Child2 need to communicate
+  const [selected, setSelected] = useState<string | null>(null);
+
+  return (
+    <div>
+      <Child1 selected={selected} onSelect={setSelected} />
+      <Child2 selected={selected} />
+    </div>
+  );
+}
+```
+
+### After: Composition Keeps State Local
+
+```tsx
+function Parent() {
+  return (
+    <SelectionContainer>
+      {({ selected, onSelect }) => (
+        <>
+          <Child1 selected={selected} onSelect={onSelect} />
+          <Child2 selected={selected} />
+        </>
+      )}
+    </SelectionContainer>
+  );
+}
+
+// Encapsulates the state
+function SelectionContainer({ children }: { children: (props: SelectionProps) => ReactNode }) {
+  const [selected, setSelected] = useState<string | null>(null);
+  return <>{children({ selected, onSelect: setSelected })}</>;
+}
+```
+
+---
+
+## Lifting Checklist
+
+| Question | Action |
+|----------|--------|
+| Do siblings need the same state? | Lift to parent |
+| How many levels will props pass? | If 3+, consider context |
+| Does the parent care about this state? | If no, maybe don't lift |
+| Will lifting cause unnecessary re-renders? | Consider memoization |
+| Is the state truly shared or just coordinated? | Maybe use callbacks instead |
+
+### Coordination Without Shared State
+
+Sometimes you don't need shared state—just coordination:
+
+```tsx
+// Instead of shared state:
+function Parent() {
+  const [openPanelId, setOpenPanelId] = useState<string | null>(null);
+  // ...
+}
+
+// Use callbacks for coordination:
+function Parent() {
+  const panelRefs = useRef<Map<string, { close: () => void }>>(new Map());
+
+  const closeOthers = (exceptId: string) => {
+    panelRefs.current.forEach((ref, id) => {
+      if (id !== exceptId) ref.close();
+    });
+  };
+
+  return (
+    <>
+      <Panel id="a" onOpen={() => closeOthers('a')} ref={/* ... */} />
+      <Panel id="b" onOpen={() => closeOthers('b')} ref={/* ... */} />
+    </>
+  );
+}
+```
+
+<Callout type="warn" title="Balance">
+Lifting state increases coupling but enables coordination. Keep state as local as possible while enabling necessary communication.
+</Callout>

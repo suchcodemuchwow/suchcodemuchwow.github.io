@@ -1,0 +1,503 @@
+---
+title: React Portals
+description: Render components outside the parent DOM hierarchy while maintaining React context and event propagation.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## What Are Portals?
+
+Portals render children into a DOM node outside the parent component's hierarchy. The component remains in React's tree (keeping context, events) but renders elsewhere in the DOM.
+
+```tsx
+import { createPortal } from 'react-dom';
+
+function MyPortal({ children }: { children: React.ReactNode }) {
+  return createPortal(
+    children,
+    document.body
+  );
+}
+```
+
+## When to Use Portals
+
+| Use Case | Reason |
+|----------|--------|
+| Modals/Dialogs | Escape parent `overflow: hidden` or `z-index` stacking |
+| Tooltips/Popovers | Position relative to viewport, not parent |
+| Dropdown menus | Avoid clipping by scrollable containers |
+| Notifications/Toasts | Render at document root level |
+| Full-screen overlays | Need to cover entire viewport |
+
+## When NOT to Use Portals
+
+| Situation | Alternative |
+|-----------|-------------|
+| Simple component composition | Regular children |
+| Layout components | CSS positioning |
+| State that doesn't need DOM escape | Standard rendering |
+| Server-side rendering without hydration checks | Conditional rendering |
+
+## Basic Portal Implementation
+
+### Simple Portal
+
+```tsx
+import { createPortal } from 'react-dom';
+import { ReactNode } from 'react';
+
+interface PortalProps {
+  children: ReactNode;
+  container?: Element | null;
+}
+
+function Portal({ children, container }: PortalProps) {
+  const target = container ?? document.body;
+  return createPortal(children, target);
+}
+
+// Usage
+function App() {
+  return (
+    <div className="app">
+      <h1>Main App</h1>
+      <Portal>
+        <div className="floating-element">
+          This renders in document.body
+        </div>
+      </Portal>
+    </div>
+  );
+}
+```
+
+### Portal with Dynamic Container
+
+```tsx
+import { createPortal } from 'react-dom';
+import { useState, useEffect, ReactNode } from 'react';
+
+interface PortalProps {
+  children: ReactNode;
+  containerId?: string;
+}
+
+function Portal({ children, containerId = 'portal-root' }: PortalProps) {
+  const [container, setContainer] = useState<HTMLElement | null>(null);
+
+  useEffect(() => {
+    let element = document.getElementById(containerId);
+
+    if (!element) {
+      element = document.createElement('div');
+      element.id = containerId;
+      document.body.appendChild(element);
+    }
+
+    setContainer(element);
+
+    return () => {
+      // Only remove if we created it and it's empty
+      if (element && element.childNodes.length === 0) {
+        element.remove();
+      }
+    };
+  }, [containerId]);
+
+  if (!container) return null;
+
+  return createPortal(children, container);
+}
+```
+
+<Callout type="info">
+Creating the container dynamically ensures it exists before rendering. This is safer than assuming a static DOM element.
+</Callout>
+
+## SSR-Safe Portal
+
+Portals need DOM access. Handle server-side rendering properly.
+
+```tsx
+import { createPortal } from 'react-dom';
+import { useState, useEffect, ReactNode } from 'react';
+
+interface SSRPortalProps {
+  children: ReactNode;
+}
+
+function SSRSafePortal({ children }: SSRPortalProps) {
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!mounted) return null;
+
+  return createPortal(children, document.body);
+}
+```
+
+### With Custom Hook
+
+```tsx
+import { useState, useEffect } from 'react';
+
+function useIsMounted() {
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  return mounted;
+}
+
+function Portal({ children }: { children: ReactNode }) {
+  const mounted = useIsMounted();
+
+  if (!mounted) return null;
+
+  return createPortal(children, document.body);
+}
+```
+
+<Callout type="warn">
+Always check for browser environment before accessing `document` or `window`. This prevents SSR hydration mismatches.
+</Callout>
+
+## Event Bubbling Through Portals
+
+Events bubble through React's component tree, not the DOM tree.
+
+```tsx
+import { createPortal } from 'react-dom';
+import { useState } from 'react';
+
+function EventBubblingDemo() {
+  const [clicks, setClicks] = useState<string[]>([]);
+
+  const handleParentClick = () => {
+    setClicks(prev => [...prev, 'Parent clicked']);
+  };
+
+  return (
+    // Events from portal children bubble here
+    <div onClick={handleParentClick} className="parent">
+      <h2>Parent Component</h2>
+      <p>Click log: {clicks.join(', ')}</p>
+
+      {createPortal(
+        <button onClick={() => setClicks(prev => [...prev, 'Button clicked'])}>
+          Click me (in portal)
+        </button>,
+        document.body
+      )}
+    </div>
+  );
+}
+```
+
+<Callout type="info">
+Even though the button renders in `document.body`, clicking it triggers both the button's handler AND the parent's handler. React maintains the logical component hierarchy for events.
+</Callout>
+
+### Stopping Event Propagation
+
+```tsx
+function PortalWithStoppedPropagation() {
+  return (
+    <div onClick={() => console.log('Parent')}>
+      {createPortal(
+        <div onClick={(e) => e.stopPropagation()}>
+          <button onClick={() => console.log('Button only')}>
+            Click (won't reach parent)
+          </button>
+        </div>,
+        document.body
+      )}
+    </div>
+  );
+}
+```
+
+## Context Access in Portals
+
+Portals maintain access to React context from the parent tree.
+
+```tsx
+import { createPortal } from 'react-dom';
+import { createContext, useContext, ReactNode } from 'react';
+
+interface ThemeContextValue {
+  theme: 'light' | 'dark';
+  colors: { background: string; text: string };
+}
+
+const ThemeContext = createContext<ThemeContextValue>({
+  theme: 'light',
+  colors: { background: '#fff', text: '#000' }
+});
+
+function ThemeProvider({ children }: { children: ReactNode }) {
+  const value: ThemeContextValue = {
+    theme: 'dark',
+    colors: { background: '#1a1a1a', text: '#fff' }
+  };
+
+  return (
+    <ThemeContext.Provider value={value}>
+      {children}
+    </ThemeContext.Provider>
+  );
+}
+
+function PortalContent() {
+  // Context works even though we're in a portal
+  const { colors } = useContext(ThemeContext);
+
+  return (
+    <div style={{ background: colors.background, color: colors.text }}>
+      This portal content uses theme context
+    </div>
+  );
+}
+
+function App() {
+  return (
+    <ThemeProvider>
+      <main>
+        <h1>Main App</h1>
+        {createPortal(<PortalContent />, document.body)}
+      </main>
+    </ThemeProvider>
+  );
+}
+```
+
+## Reusable Portal Hook
+
+```tsx
+import { createPortal } from 'react-dom';
+import { useState, useEffect, useCallback, ReactNode } from 'react';
+
+interface UsePortalOptions {
+  id?: string;
+  prepend?: boolean;
+}
+
+function usePortal(options: UsePortalOptions = {}) {
+  const { id = 'portal', prepend = false } = options;
+  const [container, setContainer] = useState<HTMLElement | null>(null);
+
+  useEffect(() => {
+    const existingContainer = document.getElementById(id);
+    const portalContainer = existingContainer || document.createElement('div');
+
+    if (!existingContainer) {
+      portalContainer.id = id;
+      if (prepend) {
+        document.body.prepend(portalContainer);
+      } else {
+        document.body.appendChild(portalContainer);
+      }
+    }
+
+    setContainer(portalContainer);
+
+    return () => {
+      if (!existingContainer && portalContainer.parentNode) {
+        portalContainer.parentNode.removeChild(portalContainer);
+      }
+    };
+  }, [id, prepend]);
+
+  const Portal = useCallback(
+    ({ children }: { children: ReactNode }) => {
+      if (!container) return null;
+      return createPortal(children, container);
+    },
+    [container]
+  );
+
+  return Portal;
+}
+
+// Usage
+function MyComponent() {
+  const Portal = usePortal({ id: 'my-portal' });
+
+  return (
+    <div>
+      <h1>Component Content</h1>
+      <Portal>
+        <div>This renders in #my-portal</div>
+      </Portal>
+    </div>
+  );
+}
+```
+
+## Multiple Portal Containers
+
+Organize different types of overlays into separate containers.
+
+```tsx
+import { createPortal } from 'react-dom';
+import { ReactNode, useEffect, useState } from 'react';
+
+type PortalLayer = 'modals' | 'tooltips' | 'notifications';
+
+const PORTAL_Z_INDEX: Record<PortalLayer, number> = {
+  tooltips: 1000,
+  modals: 2000,
+  notifications: 3000,
+};
+
+interface LayeredPortalProps {
+  children: ReactNode;
+  layer: PortalLayer;
+}
+
+function LayeredPortal({ children, layer }: LayeredPortalProps) {
+  const [container, setContainer] = useState<HTMLElement | null>(null);
+
+  useEffect(() => {
+    const id = `portal-${layer}`;
+    let element = document.getElementById(id);
+
+    if (!element) {
+      element = document.createElement('div');
+      element.id = id;
+      element.style.position = 'fixed';
+      element.style.top = '0';
+      element.style.left = '0';
+      element.style.zIndex = String(PORTAL_Z_INDEX[layer]);
+      element.style.pointerEvents = 'none';
+      document.body.appendChild(element);
+    }
+
+    setContainer(element);
+  }, [layer]);
+
+  if (!container) return null;
+
+  return createPortal(
+    <div style={{ pointerEvents: 'auto' }}>{children}</div>,
+    container
+  );
+}
+
+// Usage
+function App() {
+  return (
+    <>
+      <LayeredPortal layer="tooltips">
+        <Tooltip>Helpful tip</Tooltip>
+      </LayeredPortal>
+
+      <LayeredPortal layer="modals">
+        <Modal>Important dialog</Modal>
+      </LayeredPortal>
+
+      <LayeredPortal layer="notifications">
+        <Toast>Success!</Toast>
+      </LayeredPortal>
+    </>
+  );
+}
+```
+
+## Pros and Cons
+
+| Pros | Cons |
+|------|------|
+| Escape CSS containment (overflow, z-index) | Adds complexity to DOM structure |
+| Maintain React context and events | SSR requires careful handling |
+| Clean separation of overlay logic | Debugging DOM can be confusing |
+| Flexible positioning relative to viewport | Potential memory leaks if not cleaned up |
+| Works with any DOM node as target | Testing requires portal-aware setup |
+
+## Accessibility Considerations
+
+1. **Focus management**: Portals don't automatically manage focus. Implement focus trapping for modals.
+
+2. **Screen reader announcements**: Use `aria-live` regions for dynamic content.
+
+3. **DOM order**: Screen readers follow DOM order. Ensure portal content makes sense in context.
+
+4. **Keyboard navigation**: Tab order follows DOM, not React tree. Use `tabIndex` and focus traps appropriately.
+
+```tsx
+function AccessiblePortal({ children }: { children: ReactNode }) {
+  return createPortal(
+    <div
+      role="presentation"
+      aria-hidden="false"
+    >
+      {children}
+    </div>,
+    document.body
+  );
+}
+```
+
+<Callout type="warn">
+Portal content appears at the end of the DOM. Screen readers will encounter it after all other content unless you manage focus explicitly.
+</Callout>
+
+## Common Patterns
+
+### Conditional Portal
+
+```tsx
+interface ConditionalPortalProps {
+  children: ReactNode;
+  usePortal?: boolean;
+}
+
+function ConditionalPortal({ children, usePortal = true }: ConditionalPortalProps) {
+  if (!usePortal) {
+    return <>{children}</>;
+  }
+
+  return createPortal(children, document.body);
+}
+```
+
+### Portal with Ref Forwarding
+
+```tsx
+import { createPortal } from 'react-dom';
+import { forwardRef, ReactNode } from 'react';
+
+interface PortalProps {
+  children: ReactNode;
+}
+
+const Portal = forwardRef<HTMLDivElement, PortalProps>(
+  function Portal({ children }, ref) {
+    return createPortal(
+      <div ref={ref}>{children}</div>,
+      document.body
+    );
+  }
+);
+```
+
+## Quick Reference
+
+| API | Description |
+|-----|-------------|
+| `createPortal(children, container)` | Render children into container DOM node |
+| `createPortal(children, container, key)` | With optional key for reconciliation |
+
+| Behavior | In Portal |
+|----------|-----------|
+| Events | Bubble through React tree |
+| Context | Accessible from parent |
+| Refs | Work normally |
+| DOM position | In target container |
+| CSS inheritance | From target container, not React parent |

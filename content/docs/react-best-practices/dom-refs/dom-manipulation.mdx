@@ -1,0 +1,505 @@
+---
+title: DOM Manipulation
+description: Safe patterns for direct DOM access in React applications
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## When Direct DOM Access Is Needed
+
+React manages the DOM, but some scenarios require direct access:
+
+| Scenario | Example |
+|----------|---------|
+| Focus management | Auto-focus, focus trapping |
+| Measurements | Element dimensions, positions |
+| Scroll control | Scroll to element, scroll position |
+| Canvas/WebGL | Drawing, 3D rendering |
+| Media elements | Video/audio playback |
+| Third-party libraries | Maps, charts, editors |
+| Animations | WAAPI, scroll-linked effects |
+
+---
+
+## Safe Patterns
+
+### Read-Only Operations
+
+```tsx
+function MeasuredBox() {
+  const boxRef = useRef<HTMLDivElement>(null);
+  const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
+
+  useEffect(() => {
+    if (boxRef.current) {
+      const { width, height } = boxRef.current.getBoundingClientRect();
+      setDimensions({ width, height });
+    }
+  }, []);
+
+  return (
+    <div ref={boxRef}>
+      {dimensions.width} x {dimensions.height}
+    </div>
+  );
+}
+```
+
+### Focus Management
+
+```tsx
+function AutoFocusInput() {
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
+  return <input ref={inputRef} />;
+}
+
+function FocusTrap({ children }: { children: React.ReactNode }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const focusableElements = container.querySelectorAll<HTMLElement>(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+    );
+
+    const firstElement = focusableElements[0];
+    const lastElement = focusableElements[focusableElements.length - 1];
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Tab') return;
+
+      if (e.shiftKey && document.activeElement === firstElement) {
+        e.preventDefault();
+        lastElement?.focus();
+      } else if (!e.shiftKey && document.activeElement === lastElement) {
+        e.preventDefault();
+        firstElement?.focus();
+      }
+    };
+
+    container.addEventListener('keydown', handleKeyDown);
+    firstElement?.focus();
+
+    return () => container.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  return <div ref={containerRef}>{children}</div>;
+}
+```
+
+### Scroll Control
+
+```tsx
+function ScrollToTop() {
+  const topRef = useRef<HTMLDivElement>(null);
+
+  const scrollToTop = () => {
+    topRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  return (
+    <>
+      <div ref={topRef} />
+      <button onClick={scrollToTop}>Back to top</button>
+    </>
+  );
+}
+
+function useScrollPosition() {
+  const [scrollY, setScrollY] = useState(0);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      setScrollY(window.scrollY);
+    };
+
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  return scrollY;
+}
+```
+
+---
+
+## Dangerous Patterns to Avoid
+
+### Modifying React-Managed DOM
+
+```tsx
+// DANGEROUS: React will be confused
+function BadExample() {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (ref.current) {
+      // Never do this - React manages this content
+      ref.current.innerHTML = '<span>Injected</span>';
+
+      // Never do this - React manages children
+      ref.current.appendChild(document.createElement('div'));
+
+      // Never do this - conflicts with React's state
+      ref.current.style.display = 'none';
+    }
+  }, []);
+
+  return <div ref={ref}>React content</div>;
+}
+```
+
+### Safe Alternative
+
+```tsx
+// SAFE: Let React manage the DOM
+function GoodExample() {
+  const [content, setContent] = useState('Initial');
+  const [isVisible, setIsVisible] = useState(true);
+
+  return (
+    <div style={{ display: isVisible ? 'block' : 'none' }}>
+      {content}
+    </div>
+  );
+}
+
+// SAFE: Ref to empty container for external content
+function SafeExternalContent() {
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    // OK: container is empty, React doesn't manage its children
+    const externalElement = document.createElement('div');
+    externalElement.textContent = 'External content';
+    container.appendChild(externalElement);
+
+    return () => {
+      container.innerHTML = '';
+    };
+  }, []);
+
+  // Empty div - React won't try to manage children
+  return <div ref={containerRef} />;
+}
+```
+
+<Callout type="error" title="Critical Rule">
+Never modify DOM elements or their children that React renders. Only manipulate empty containers or elements outside React's tree.
+</Callout>
+
+---
+
+## Third-Party DOM Libraries
+
+### Integration Pattern
+
+```tsx
+interface MapContainerProps {
+  center: { lat: number; lng: number };
+  zoom: number;
+}
+
+function MapContainer({ center, zoom }: MapContainerProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const mapInstanceRef = useRef<MapLibrary | null>(null);
+
+  // Initialize once
+  useEffect(() => {
+    if (!containerRef.current) return;
+
+    // Create instance in empty container
+    mapInstanceRef.current = new MapLibrary(containerRef.current, {
+      center,
+      zoom,
+    });
+
+    // Cleanup
+    return () => {
+      mapInstanceRef.current?.destroy();
+      mapInstanceRef.current = null;
+    };
+  }, []); // Empty deps - initialize once
+
+  // Sync props to instance
+  useEffect(() => {
+    mapInstanceRef.current?.setCenter(center);
+  }, [center]);
+
+  useEffect(() => {
+    mapInstanceRef.current?.setZoom(zoom);
+  }, [zoom]);
+
+  return <div ref={containerRef} style={{ width: '100%', height: '400px' }} />;
+}
+```
+
+### Rich Text Editor Pattern
+
+```tsx
+interface EditorProps {
+  initialContent: string;
+  onChange: (content: string) => void;
+}
+
+function RichTextEditor({ initialContent, onChange }: EditorProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const editorRef = useRef<EditorLibrary | null>(null);
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+
+    editorRef.current = new EditorLibrary(containerRef.current, {
+      content: initialContent,
+      onChange: (newContent: string) => {
+        onChange(newContent);
+      },
+    });
+
+    return () => {
+      editorRef.current?.destroy();
+    };
+  }, []); // Don't include initialContent - only used for init
+
+  // Expose methods if needed
+  const insertText = useCallback((text: string) => {
+    editorRef.current?.insertText(text);
+  }, []);
+
+  return <div ref={containerRef} />;
+}
+```
+
+---
+
+## Portals for DOM Placement
+
+Render children into a different DOM node:
+
+```tsx
+interface ModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  children: React.ReactNode;
+}
+
+function Modal({ isOpen, onClose, children }: ModalProps) {
+  const [container, setContainer] = useState<HTMLElement | null>(null);
+
+  useEffect(() => {
+    const el = document.createElement('div');
+    el.id = 'modal-root';
+    document.body.appendChild(el);
+    setContainer(el);
+
+    return () => {
+      document.body.removeChild(el);
+    };
+  }, []);
+
+  if (!isOpen || !container) return null;
+
+  return createPortal(
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-content" onClick={e => e.stopPropagation()}>
+        {children}
+      </div>
+    </div>,
+    container
+  );
+}
+```
+
+### Portal to Existing Element
+
+```tsx
+function Tooltip({ children, targetId }: { children: React.ReactNode; targetId: string }) {
+  const [target, setTarget] = useState<HTMLElement | null>(null);
+
+  useEffect(() => {
+    setTarget(document.getElementById(targetId));
+  }, [targetId]);
+
+  if (!target) return null;
+
+  return createPortal(children, target);
+}
+```
+
+<Callout type="info" title="Portal Events">
+Events bubble through the React tree, not the DOM tree. A click inside a portal still bubbles to React ancestors.
+</Callout>
+
+---
+
+## Measuring After Paint
+
+### useLayoutEffect for Synchronous Measurements
+
+```tsx
+function TooltipPositioner({ children, targetRef }: Props) {
+  const tooltipRef = useRef<HTMLDivElement>(null);
+  const [position, setPosition] = useState({ top: 0, left: 0 });
+
+  // Runs synchronously after DOM mutations, before paint
+  useLayoutEffect(() => {
+    if (!targetRef.current || !tooltipRef.current) return;
+
+    const targetRect = targetRef.current.getBoundingClientRect();
+    const tooltipRect = tooltipRef.current.getBoundingClientRect();
+
+    setPosition({
+      top: targetRect.bottom + 8,
+      left: targetRect.left + (targetRect.width - tooltipRect.width) / 2,
+    });
+  }, []);
+
+  return (
+    <div
+      ref={tooltipRef}
+      style={{
+        position: 'fixed',
+        top: position.top,
+        left: position.left,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+```
+
+### useEffect vs useLayoutEffect
+
+| Hook | Timing | Use For |
+|------|--------|---------|
+| `useEffect` | After paint | Most effects, data fetching |
+| `useLayoutEffect` | Before paint | DOM measurements, visual updates |
+
+```tsx
+// useEffect: may cause flash
+useEffect(() => {
+  const height = ref.current?.offsetHeight;
+  setHeight(height); // Re-render after paint = flash
+}, []);
+
+// useLayoutEffect: no flash
+useLayoutEffect(() => {
+  const height = ref.current?.offsetHeight;
+  setHeight(height); // Re-render before paint = no flash
+}, []);
+```
+
+<Callout type="warn" title="Performance">
+`useLayoutEffect` blocks the browser from painting. Keep it fast. Move expensive work to `useEffect`.
+</Callout>
+
+---
+
+## Animation Libraries Integration
+
+### Web Animations API
+
+```tsx
+function AnimatedBox() {
+  const boxRef = useRef<HTMLDivElement>(null);
+  const animationRef = useRef<Animation | null>(null);
+
+  const animate = () => {
+    if (!boxRef.current) return;
+
+    // Cancel previous animation
+    animationRef.current?.cancel();
+
+    animationRef.current = boxRef.current.animate(
+      [
+        { transform: 'translateX(0)', opacity: 1 },
+        { transform: 'translateX(100px)', opacity: 0.5 },
+        { transform: 'translateX(0)', opacity: 1 },
+      ],
+      {
+        duration: 1000,
+        easing: 'ease-in-out',
+      }
+    );
+  };
+
+  useEffect(() => {
+    return () => {
+      animationRef.current?.cancel();
+    };
+  }, []);
+
+  return (
+    <>
+      <div ref={boxRef} className="box" />
+      <button onClick={animate}>Animate</button>
+    </>
+  );
+}
+```
+
+### Scroll-Linked Animations
+
+```tsx
+function ScrollProgress() {
+  const [progress, setProgress] = useState(0);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      const scrollHeight = document.documentElement.scrollHeight - window.innerHeight;
+      const scrolled = window.scrollY / scrollHeight;
+      setProgress(scrolled);
+    };
+
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  return (
+    <div
+      className="progress-bar"
+      style={{ transform: `scaleX(${progress})` }}
+    />
+  );
+}
+```
+
+### Cleanup Pattern
+
+```tsx
+function AnimatedComponent() {
+  const elementRef = useRef<HTMLDivElement>(null);
+  const animationsRef = useRef<Animation[]>([]);
+
+  useEffect(() => {
+    const element = elementRef.current;
+    if (!element) return;
+
+    // Store all animations for cleanup
+    const fadeIn = element.animate(
+      [{ opacity: 0 }, { opacity: 1 }],
+      { duration: 300 }
+    );
+    animationsRef.current.push(fadeIn);
+
+    return () => {
+      // Cancel all animations on unmount
+      animationsRef.current.forEach(anim => anim.cancel());
+      animationsRef.current = [];
+    };
+  }, []);
+
+  return <div ref={elementRef}>Animated content</div>;
+}
+```

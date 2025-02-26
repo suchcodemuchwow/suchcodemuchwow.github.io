@@ -1,0 +1,418 @@
+---
+title: Suspense
+description: Declarative loading states and async rendering in React
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## Mental Model
+
+Suspense lets components "wait" for something before rendering. Instead of imperative loading state management, you declare what to show while waiting.
+
+**Without Suspense:**
+```tsx
+function Profile() {
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchUser().then(data => {
+      setUser(data);
+      setLoading(false);
+    });
+  }, []);
+
+  if (loading) return <Spinner />;
+  return <UserCard user={user!} />;
+}
+```
+
+**With Suspense:**
+```tsx
+function Profile() {
+  return (
+    <Suspense fallback={<Spinner />}>
+      <UserCard />
+    </Suspense>
+  );
+}
+
+function UserCard() {
+  const user = use(fetchUser()); // Suspends until resolved
+  return <div>{user.name}</div>;
+}
+```
+
+<Callout type="info" title="Key Insight">
+Suspense inverts control. Instead of components managing their loading states, the parent decides what to show during loading.
+</Callout>
+
+---
+
+## Suspense for Lazy Loading
+
+The most common use case. Split code and load components on demand:
+
+```tsx
+import { lazy, Suspense } from 'react';
+
+const Dashboard = lazy(() => import('./Dashboard'));
+const Settings = lazy(() => import('./Settings'));
+
+function App() {
+  return (
+    <Suspense fallback={<PageSkeleton />}>
+      <Routes>
+        <Route path="/" element={<Dashboard />} />
+        <Route path="/settings" element={<Settings />} />
+      </Routes>
+    </Suspense>
+  );
+}
+```
+
+### When to Lazy Load
+
+| Good Candidates | Poor Candidates |
+|-----------------|-----------------|
+| Route components | Small, frequently used components |
+| Heavy modals/dialogs | Core UI elements |
+| Rich text editors | Navigation components |
+| Chart libraries | Components needed immediately |
+| Admin-only features | Above-the-fold content |
+
+---
+
+## Suspense for Data
+
+React 18+ supports Suspense for data fetching with the `use` hook:
+
+```tsx
+import { use, Suspense } from 'react';
+
+// Create a promise that can be read by `use`
+const userPromise = fetchUser();
+
+function UserProfile() {
+  const user = use(userPromise);
+  return <div>{user.name}</div>;
+}
+
+function App() {
+  return (
+    <Suspense fallback={<ProfileSkeleton />}>
+      <UserProfile />
+    </Suspense>
+  );
+}
+```
+
+### Creating Suspense-Compatible Data Sources
+
+```tsx
+// Simple cache for demonstration
+const cache = new Map<string, Promise<unknown>>();
+
+function fetchWithSuspense<T>(key: string, fetcher: () => Promise<T>): Promise<T> {
+  if (!cache.has(key)) {
+    cache.set(key, fetcher());
+  }
+  return cache.get(key) as Promise<T>;
+}
+
+function UserList() {
+  const users = use(fetchWithSuspense('users', () =>
+    fetch('/api/users').then(r => r.json())
+  ));
+
+  return (
+    <ul>
+      {users.map((user: User) => (
+        <li key={user.id}>{user.name}</li>
+      ))}
+    </ul>
+  );
+}
+```
+
+<Callout type="warn" title="Important">
+The `use` hook reads promises during render. The promise must be created outside the component or memoized to avoid infinite loops.
+</Callout>
+
+---
+
+## Fallback UI Patterns
+
+### Skeleton Screens
+
+Match the layout of the loading content:
+
+```tsx
+function CardSkeleton() {
+  return (
+    <div className="card">
+      <div className="skeleton-avatar" />
+      <div className="skeleton-text" />
+      <div className="skeleton-text short" />
+    </div>
+  );
+}
+
+<Suspense fallback={<CardSkeleton />}>
+  <UserCard />
+</Suspense>
+```
+
+### Spinner vs Skeleton
+
+| Approach | When to Use |
+|----------|-------------|
+| Spinner | Unknown content structure, quick loads |
+| Skeleton | Known layout, improves perceived performance |
+| Nothing | Instant transitions (with `useTransition`) |
+
+### Delayed Fallbacks
+
+Prevent flash of loading state for fast loads:
+
+```tsx
+function DelayedSpinner() {
+  const [show, setShow] = useState(false);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setShow(true), 200);
+    return () => clearTimeout(timer);
+  }, []);
+
+  return show ? <Spinner /> : null;
+}
+
+<Suspense fallback={<DelayedSpinner />}>
+  <Content />
+</Suspense>
+```
+
+---
+
+## Nested Suspense
+
+Control loading granularity by nesting boundaries:
+
+```tsx
+function Dashboard() {
+  return (
+    <div className="dashboard">
+      {/* Header loads first */}
+      <Suspense fallback={<HeaderSkeleton />}>
+        <Header />
+      </Suspense>
+
+      <div className="main">
+        {/* Sidebar and content load independently */}
+        <Suspense fallback={<SidebarSkeleton />}>
+          <Sidebar />
+        </Suspense>
+
+        <Suspense fallback={<ContentSkeleton />}>
+          <MainContent />
+        </Suspense>
+      </div>
+    </div>
+  );
+}
+```
+
+### Nested vs Flat
+
+```tsx
+// Flat: Everything waits for slowest
+<Suspense fallback={<FullPageSkeleton />}>
+  <Header />
+  <Sidebar />
+  <Content />
+</Suspense>
+
+// Nested: Progressive loading
+<Suspense fallback={<HeaderSkeleton />}>
+  <Header />
+  <Suspense fallback={<BodySkeleton />}>
+    <Sidebar />
+    <Content />
+  </Suspense>
+</Suspense>
+```
+
+| Pattern | Pros | Cons |
+|---------|------|------|
+| Single boundary | Consistent reveal, simpler | Blocked by slowest component |
+| Multiple boundaries | Progressive loading | Layout shift, more complexity |
+
+---
+
+## Suspense and Error Boundaries
+
+Combine for complete async handling:
+
+```tsx
+import { Component, Suspense } from 'react';
+
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+}
+
+class ErrorBoundary extends Component<
+  { children: React.ReactNode; fallback: React.ReactNode },
+  ErrorBoundaryState
+> {
+  state: ErrorBoundaryState = { hasError: false, error: null };
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return this.props.fallback;
+    }
+    return this.props.children;
+  }
+}
+
+function App() {
+  return (
+    <ErrorBoundary fallback={<ErrorPage />}>
+      <Suspense fallback={<Loading />}>
+        <AsyncContent />
+      </Suspense>
+    </ErrorBoundary>
+  );
+}
+```
+
+### Error Recovery
+
+```tsx
+class ErrorBoundary extends Component<Props, State> {
+  state = { hasError: false };
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  handleRetry = () => {
+    this.setState({ hasError: false });
+  };
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div>
+          <p>Something went wrong</p>
+          <button onClick={this.handleRetry}>Try again</button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+```
+
+<Callout type="info" title="Boundary Order">
+Error boundaries catch errors from Suspense. Place the error boundary outside the Suspense boundary.
+</Callout>
+
+---
+
+## SSR with Suspense
+
+React 18 streaming SSR works with Suspense:
+
+```tsx
+// Server streams HTML progressively
+function Page() {
+  return (
+    <html>
+      <body>
+        <Header /> {/* Sent immediately */}
+
+        <Suspense fallback={<Spinner />}>
+          <SlowContent /> {/* Streamed when ready */}
+        </Suspense>
+      </body>
+    </html>
+  );
+}
+```
+
+### Selective Hydration
+
+```tsx
+<Suspense fallback={<CommentsSkeleton />}>
+  <Comments /> {/* Hydrates independently */}
+</Suspense>
+```
+
+Benefits:
+- HTML streams progressively
+- Components hydrate as they load
+- User interactions prioritize hydration
+- No blocking on slow data
+
+### SSR Considerations
+
+| Feature | Behavior |
+|---------|----------|
+| Lazy components | Stream HTML when loaded |
+| Data fetching | Stream when data resolves |
+| Client navigation | Normal Suspense behavior |
+| Hydration | Selective, prioritized by interaction |
+
+---
+
+## Current Limitations
+
+### What Suspense Cannot Do
+
+1. **Catch sync errors** — Use Error Boundaries
+2. **Handle non-Promise async** — Only works with promises
+3. **Retry automatically** — Must implement retry logic
+4. **Cancel requests** — Promises don't cancel natively
+
+### Browser Compatibility
+
+```tsx
+// Suspense works in all modern browsers
+// For older browsers, ensure React 18+ polyfills
+```
+
+### When NOT to Use Suspense
+
+| Scenario | Alternative |
+|----------|-------------|
+| Simple loading states | useState + useEffect |
+| Form submission loading | isPending from useTransition |
+| Optimistic updates | useState for immediate UI |
+| Complex loading logic | Custom hooks |
+
+---
+
+## Suspense vs Traditional Loading
+
+| Aspect | Suspense | useState/useEffect |
+|--------|----------|-------------------|
+| Loading state | Declarative, parent controls | Imperative, component controls |
+| Code location | Boundary wraps component | Inside component |
+| Composition | Nested boundaries | Prop drilling or context |
+| Concurrent features | Works with transitions | Manual coordination |
+| SSR streaming | Automatic | Not supported |
+
+---
+
+## Best Practices
+
+1. **Place boundaries strategically** — Not too granular, not too broad
+2. **Match skeletons to content** — Reduce layout shift
+3. **Combine with Error Boundaries** — Handle failures gracefully
+4. **Use transitions for navigation** — Avoid loading flash
+5. **Preload when possible** — Start fetching before navigation

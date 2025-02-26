@@ -1,0 +1,269 @@
+---
+title: Component Patterns
+description: Reusable component design patterns in React
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## Container/Presentation Pattern
+
+Separate data fetching from rendering:
+
+```tsx
+// Container: handles data
+function UserListContainer() {
+  const { data: users, isLoading, error } = useUsers();
+
+  if (isLoading) return <Spinner />;
+  if (error) return <ErrorMessage error={error} />;
+
+  return <UserList users={users} />;
+}
+
+// Presentation: pure rendering
+function UserList({ users }: { users: User[] }) {
+  return (
+    <ul>
+      {users.map(user => (
+        <UserItem key={user.id} user={user} />
+      ))}
+    </ul>
+  );
+}
+```
+
+<Callout type="info" title="Best Practice">
+Presentation components are easier to test, reuse, and understand. They take props and render UI—nothing more.
+</Callout>
+
+---
+
+## Compound Components
+
+Components that work together implicitly sharing state:
+
+```tsx
+// Usage
+<Select value={value} onChange={setValue}>
+  <Select.Trigger>Choose option</Select.Trigger>
+  <Select.Options>
+    <Select.Option value="a">Option A</Select.Option>
+    <Select.Option value="b">Option B</Select.Option>
+  </Select.Options>
+</Select>
+
+// Implementation
+const SelectContext = createContext<SelectContextValue | null>(null);
+
+function Select({ children, value, onChange }) {
+  return (
+    <SelectContext.Provider value={{ value, onChange }}>
+      {children}
+    </SelectContext.Provider>
+  );
+}
+
+Select.Trigger = function Trigger({ children }) {
+  const { value } = useContext(SelectContext);
+  return <button>{children}: {value}</button>;
+};
+
+Select.Options = function Options({ children }) {
+  return <div className="options">{children}</div>;
+};
+
+Select.Option = function Option({ value, children }) {
+  const { onChange } = useContext(SelectContext);
+  return <div onClick={() => onChange(value)}>{children}</div>;
+};
+```
+
+---
+
+## Render Props
+
+Pass a function as children for flexible rendering:
+
+```tsx
+interface MousePosition {
+  x: number;
+  y: number;
+}
+
+function MouseTracker({ children }: { children: (pos: MousePosition) => ReactNode }) {
+  const [position, setPosition] = useState({ x: 0, y: 0 });
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      setPosition({ x: e.clientX, y: e.clientY });
+    };
+    window.addEventListener('mousemove', handler);
+    return () => window.removeEventListener('mousemove', handler);
+  }, []);
+
+  return <>{children(position)}</>;
+}
+
+// Usage
+<MouseTracker>
+  {({ x, y }) => (
+    <div>Mouse at: {x}, {y}</div>
+  )}
+</MouseTracker>
+```
+
+<Callout type="info" title="When to Use">
+Render props are useful when you need dynamic rendering logic. For simpler cases, prefer custom hooks.
+</Callout>
+
+---
+
+## Custom Hooks
+
+Extract reusable stateful logic:
+
+```tsx
+function useLocalStorage<T>(key: string, initialValue: T) {
+  const [value, setValue] = useState<T>(() => {
+    const stored = localStorage.getItem(key);
+    return stored ? JSON.parse(stored) : initialValue;
+  });
+
+  useEffect(() => {
+    localStorage.setItem(key, JSON.stringify(value));
+  }, [key, value]);
+
+  return [value, setValue] as const;
+}
+
+// Usage
+function Settings() {
+  const [theme, setTheme] = useLocalStorage('theme', 'light');
+  return <ThemeToggle value={theme} onChange={setTheme} />;
+}
+```
+
+### Hook Naming Conventions
+
+| Pattern | Example |
+|---------|---------|
+| `use[Resource]` | `useUser`, `useProducts` |
+| `use[Action]` | `useDebounce`, `useToggle` |
+| `use[Context]` | `useAuth`, `useTheme` |
+
+---
+
+## Higher-Order Components (HOC)
+
+Wrap components to add functionality:
+
+```tsx
+function withErrorBoundary<P extends object>(
+  Component: ComponentType<P>,
+  FallbackComponent: ComponentType<{ error: Error }>
+) {
+  return function WrappedComponent(props: P) {
+    return (
+      <ErrorBoundary FallbackComponent={FallbackComponent}>
+        <Component {...props} />
+      </ErrorBoundary>
+    );
+  };
+}
+
+// Usage
+const SafeUserProfile = withErrorBoundary(UserProfile, ErrorFallback);
+```
+
+<Callout type="warn" title="Prefer Hooks">
+HOCs were common before hooks. Today, prefer custom hooks for most use cases. HOCs are still useful for cross-cutting concerns like error boundaries.
+</Callout>
+
+---
+
+## Controlled vs Uncontrolled
+
+### Controlled Components
+
+State lives in parent:
+
+```tsx
+function ControlledInput({ value, onChange }: Props) {
+  return <input value={value} onChange={e => onChange(e.target.value)} />;
+}
+
+// Parent controls state
+const [name, setName] = useState('');
+<ControlledInput value={name} onChange={setName} />
+```
+
+### Uncontrolled Components
+
+State lives in DOM:
+
+```tsx
+function UncontrolledInput({ defaultValue }: Props) {
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  return <input ref={inputRef} defaultValue={defaultValue} />;
+}
+
+// Access via ref
+inputRef.current?.value
+```
+
+### Hybrid Pattern
+
+Support both modes:
+
+```tsx
+interface InputProps {
+  value?: string;
+  defaultValue?: string;
+  onChange?: (value: string) => void;
+}
+
+function Input({ value, defaultValue, onChange }: InputProps) {
+  const [internalValue, setInternalValue] = useState(defaultValue ?? '');
+  const isControlled = value !== undefined;
+
+  const currentValue = isControlled ? value : internalValue;
+
+  const handleChange = (e: ChangeEvent<HTMLInputElement>) => {
+    const newValue = e.target.value;
+    if (!isControlled) {
+      setInternalValue(newValue);
+    }
+    onChange?.(newValue);
+  };
+
+  return <input value={currentValue} onChange={handleChange} />;
+}
+```
+
+---
+
+## Polymorphic Components
+
+Components that can render as different elements:
+
+```tsx
+type ButtonProps<T extends ElementType> = {
+  as?: T;
+  children: ReactNode;
+} & ComponentPropsWithoutRef<T>;
+
+function Button<T extends ElementType = 'button'>({
+  as,
+  children,
+  ...props
+}: ButtonProps<T>) {
+  const Component = as || 'button';
+  return <Component {...props}>{children}</Component>;
+}
+
+// Usage
+<Button>Click me</Button>                    // renders <button>
+<Button as="a" href="/home">Home</Button>    // renders <a>
+<Button as={Link} to="/about">About</Button> // renders React Router Link
+```

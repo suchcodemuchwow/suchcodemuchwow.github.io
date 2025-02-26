@@ -1,0 +1,414 @@
+---
+title: Colocation
+description: Keeping related code together for maintainability
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## What is Colocation
+
+Colocation means placing related code close together. Files that change together should live together.
+
+```
+src/components/Button/
+├── Button.tsx          # Component
+├── Button.test.tsx     # Tests
+├── Button.module.css   # Styles
+└── index.ts            # Re-export
+```
+
+### Benefits
+
+| Benefit | Description |
+|---------|-------------|
+| Discoverability | Find all related code in one place |
+| Maintenance | Changes happen in one location |
+| Deletion | Remove feature = delete folder |
+| Context | Understand component by browsing folder |
+
+---
+
+## What to Colocate
+
+### Component + Styles + Tests
+
+```
+src/components/UserCard/
+├── UserCard.tsx
+├── UserCard.module.css
+├── UserCard.test.tsx
+└── index.ts
+```
+
+```tsx
+// UserCard.tsx
+import styles from './UserCard.module.css';
+
+export function UserCard({ user }: UserCardProps) {
+  return (
+    <div className={styles.card}>
+      <img className={styles.avatar} src={user.avatar} />
+      <span className={styles.name}>{user.name}</span>
+    </div>
+  );
+}
+```
+
+### Component + Sub-Components
+
+```
+src/components/DataTable/
+├── DataTable.tsx           # Main component
+├── DataTableHeader.tsx     # Sub-component
+├── DataTableRow.tsx        # Sub-component
+├── DataTableCell.tsx       # Sub-component
+├── DataTable.module.css
+├── DataTable.test.tsx
+└── index.ts
+```
+
+```tsx
+// index.ts - Only export the main component
+export { DataTable } from './DataTable';
+export type { DataTableProps, Column } from './DataTable';
+```
+
+### Component + Types
+
+```tsx
+// UserCard/UserCard.tsx
+interface UserCardProps {
+  user: User;
+  variant?: 'compact' | 'detailed';
+  onSelect?: (user: User) => void;
+}
+
+interface User {
+  id: string;
+  name: string;
+  avatar: string;
+}
+
+export function UserCard({ user, variant = 'compact', onSelect }: UserCardProps) {
+  // ...
+}
+```
+
+<Callout type="info" title="Principle">
+If a type is only used by one component, define it in that component file. Extract to shared types only when multiple components need it.
+</Callout>
+
+---
+
+## Hooks Near Components
+
+### Feature-Specific Hook
+
+```
+src/features/cart/
+├── components/
+│   ├── Cart.tsx
+│   └── CartItem.tsx
+├── hooks/
+│   └── useCart.ts          # Colocated with cart feature
+└── index.ts
+```
+
+### Component-Specific Hook
+
+```
+src/components/Autocomplete/
+├── Autocomplete.tsx
+├── useAutocomplete.ts      # Only used by Autocomplete
+├── Autocomplete.test.tsx
+└── index.ts
+```
+
+```tsx
+// useAutocomplete.ts
+export function useAutocomplete<T>(options: AutocompleteOptions<T>) {
+  const [query, setQuery] = useState('');
+  const [isOpen, setIsOpen] = useState(false);
+  const [highlightedIndex, setHighlightedIndex] = useState(-1);
+
+  // Filter, keyboard navigation, etc.
+
+  return {
+    query,
+    setQuery,
+    isOpen,
+    setIsOpen,
+    highlightedIndex,
+    // ...
+  };
+}
+
+// Autocomplete.tsx
+import { useAutocomplete } from './useAutocomplete';
+
+export function Autocomplete<T>({ items, onSelect }: Props<T>) {
+  const autocomplete = useAutocomplete({ items });
+  // ...
+}
+```
+
+---
+
+## Types Near Usage
+
+### Local Types (Colocate)
+
+```tsx
+// OrderForm.tsx
+interface OrderFormData {
+  items: CartItem[];
+  shippingAddress: Address;
+  paymentMethod: PaymentMethod;
+}
+
+interface OrderFormProps {
+  onSubmit: (data: OrderFormData) => void;
+  initialData?: Partial<OrderFormData>;
+}
+
+export function OrderForm({ onSubmit, initialData }: OrderFormProps) {
+  // ...
+}
+```
+
+### Shared Types (Extract)
+
+When types are used across multiple files:
+
+```
+src/features/orders/
+├── types.ts                # Shared within feature
+├── components/
+│   ├── OrderList.tsx       # Uses Order type
+│   └── OrderDetails.tsx    # Uses Order type
+└── hooks/
+    └── useOrders.ts        # Uses Order type
+```
+
+```tsx
+// types.ts
+export interface Order {
+  id: string;
+  status: OrderStatus;
+  items: OrderItem[];
+  total: number;
+  createdAt: Date;
+}
+
+export type OrderStatus = 'pending' | 'processing' | 'shipped' | 'delivered';
+
+export interface OrderItem {
+  productId: string;
+  quantity: number;
+  price: number;
+}
+```
+
+---
+
+## When NOT to Colocate
+
+### 1. Shared Utilities
+
+```tsx
+// Bad: Utility colocated with one component but used everywhere
+src/components/Button/
+├── Button.tsx
+├── cn.ts              // ❌ Used by many components
+└── index.ts
+
+// Good: Shared utilities in shared folder
+src/shared/utils/
+└── cn.ts              // ✓ Available to all
+
+src/components/Button/
+├── Button.tsx
+└── index.ts
+```
+
+### 2. Global Types
+
+```tsx
+// Bad: API types in a component folder
+src/components/UserList/
+├── UserList.tsx
+└── apiTypes.ts        // ❌ Used by services, other components
+
+// Good: API types in shared
+src/shared/types/
+└── api.ts             // ✓ ApiResponse, ApiError, etc.
+```
+
+### 3. Business Logic Used Elsewhere
+
+```tsx
+// Bad: Business logic in component, needed elsewhere
+src/components/PriceDisplay/
+├── PriceDisplay.tsx
+└── calculateDiscount.ts  // ❌ Also needed in CartTotal, Checkout
+
+// Good: Business logic in shared or feature
+src/features/pricing/
+├── utils/
+│   └── calculateDiscount.ts  // ✓ Used by multiple components
+└── components/
+    └── PriceDisplay.tsx
+```
+
+### Summary Table
+
+| Colocate | Don't Colocate |
+|----------|----------------|
+| Component-specific styles | Global styles |
+| Component-specific hooks | Utility hooks (useDebounce) |
+| Component-specific types | Shared domain types |
+| Sub-components | Reusable components |
+| Unit tests | E2E tests |
+| Component-specific utils | General utilities |
+
+---
+
+## Shared Code Extraction Rules
+
+### The Rule of Three
+
+```
+1 usage  → Keep it local
+2 usages → Consider extraction (but don't rush)
+3 usages → Extract to shared
+```
+
+### Extraction Checklist
+
+Before extracting to shared:
+
+- [ ] Is it used by 3+ components/features?
+- [ ] Is the implementation stable?
+- [ ] Would changes affect multiple features?
+- [ ] Is it truly generic (no feature-specific logic)?
+
+### Extraction Process
+
+```tsx
+// Step 1: Start colocated
+src/features/users/components/UserCard/
+├── UserCard.tsx
+└── formatUserName.ts    // Only used here
+
+// Step 2: Second usage appears
+src/features/users/
+├── components/UserCard/
+├── components/UserProfile/
+│   └── UserProfile.tsx  // Also needs formatUserName
+└── utils/
+    └── formatUserName.ts  // Moved up to feature level
+
+// Step 3: Third feature needs it
+src/shared/utils/
+└── formatUserName.ts    // Moved to shared
+```
+
+<Callout type="warn" title="Don't Pre-Optimize">
+Resist the urge to extract early. Premature abstraction creates coupling and makes future changes harder. Let duplication guide extraction.
+</Callout>
+
+---
+
+## Balance: Colocation vs Reuse
+
+### When to Favor Colocation
+
+- New feature development
+- Unstable/evolving code
+- Feature-specific logic
+- Team owns the feature
+
+### When to Favor Extraction
+
+- Stable, proven patterns
+- True cross-cutting concerns
+- UI primitives (Button, Input)
+- Utility functions
+
+### Feature Development Lifecycle
+
+```
+Phase 1: Exploration
+└── Everything colocated in feature folder
+    └── Types, hooks, utils all local
+
+Phase 2: Stabilization
+└── Patterns emerge
+    └── Extract within feature (hooks/, utils/)
+
+Phase 3: Reuse
+└── Other features need similar code
+    └── Extract to shared/ with clear API
+```
+
+---
+
+## Practical Examples
+
+### Feature Module with Colocation
+
+```
+src/features/authentication/
+├── components/
+│   ├── LoginForm/
+│   │   ├── LoginForm.tsx
+│   │   ├── LoginForm.module.css
+│   │   ├── LoginForm.test.tsx
+│   │   ├── useLoginForm.ts         # Form-specific hook
+│   │   └── index.ts
+│   └── PasswordStrength/
+│       ├── PasswordStrength.tsx
+│       ├── calculateStrength.ts    # Only used here
+│       └── index.ts
+├── hooks/
+│   └── useAuth.ts                  # Feature-wide hook
+├── types.ts                        # Feature types
+└── index.ts                        # Public API
+```
+
+### Shared Component with Colocation
+
+```
+src/shared/components/Modal/
+├── Modal.tsx
+├── ModalHeader.tsx
+├── ModalBody.tsx
+├── ModalFooter.tsx
+├── Modal.module.css
+├── Modal.test.tsx
+├── useModal.ts                     # Modal-specific hook
+└── index.ts
+```
+
+```tsx
+// index.ts
+export { Modal } from './Modal';
+export { ModalHeader } from './ModalHeader';
+export { ModalBody } from './ModalBody';
+export { ModalFooter } from './ModalFooter';
+export { useModal } from './useModal';
+```
+
+---
+
+## Colocation Checklist
+
+When organizing a new component or feature:
+
+- [ ] Styles colocated (CSS Modules or styled-components)
+- [ ] Unit tests colocated (`.test.tsx` next to component)
+- [ ] Component-specific types in same file
+- [ ] Component-specific hooks in same folder
+- [ ] Sub-components in same folder
+- [ ] Only export public API through index.ts
+- [ ] Shared code extracted only when 3+ usages

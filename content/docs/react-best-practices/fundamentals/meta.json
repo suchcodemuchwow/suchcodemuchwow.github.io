@@ -1,0 +1,4 @@
+{
+  "title": "Fundamentals",
+  "pages": ["index", "jsx-patterns", "props-design", "children-patterns", "component-patterns"]
+}

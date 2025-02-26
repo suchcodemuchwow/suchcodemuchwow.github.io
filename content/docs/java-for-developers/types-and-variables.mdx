@@ -1,0 +1,130 @@
+---
+title: Types and Variables
+description: Understanding Java's type system for JS/TS and Go developers
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## Primitive Types
+
+Java has eight primitive types that are not objects:
+
+| Type | Size | Default | Range |
+|------|------|---------|-------|
+| `byte` | 8-bit | 0 | -128 to 127 |
+| `short` | 16-bit | 0 | -32,768 to 32,767 |
+| `int` | 32-bit | 0 | -2³¹ to 2³¹-1 |
+| `long` | 64-bit | 0L | -2⁶³ to 2⁶³-1 |
+| `float` | 32-bit | 0.0f | IEEE 754 |
+| `double` | 64-bit | 0.0d | IEEE 754 |
+| `boolean` | 1-bit | false | true/false |
+| `char` | 16-bit | '\u0000' | Unicode character |
+
+<Callout type="info" title="JS/TS delta">
+JavaScript has only `number` (64-bit float) and `bigint`. Java's multiple numeric types require explicit consideration of precision and overflow.
+</Callout>
+
+---
+
+## Variable Declaration
+
+### Local Variables with `var`
+
+Java 10+ supports type inference for local variables:
+
+```java
+var name = "Alice";        // inferred as String
+var count = 42;            // inferred as int
+var items = List.of(1, 2); // inferred as List<Integer>
+```
+
+<Callout type="info" title="JS/TS delta">
+Java's `var` is compile-time inference only. The type is fixed at declaration—unlike TypeScript's `let` which allows reassignment to different types when not annotated.
+</Callout>
+
+### When to Use Explicit Types
+
+Prefer explicit types when:
+- The right-hand side doesn't clearly indicate the type
+- Working with numeric types where precision matters
+- Public API signatures (fields, method parameters, return types)
+
+```java
+// Explicit is clearer here
+long timestamp = System.currentTimeMillis();
+Map<String, List<User>> usersByDepartment = new HashMap<>();
+```
+
+---
+
+## Reference Types vs Primitives
+
+### Boxing and Unboxing
+
+Java automatically converts between primitives and their wrapper classes:
+
+```java
+Integer boxed = 42;         // auto-boxing: int → Integer
+int primitive = boxed;       // auto-unboxing: Integer → int
+
+List<Integer> numbers = new ArrayList<>();
+numbers.add(1);              // auto-boxing
+int first = numbers.get(0);  // auto-unboxing
+```
+
+<Callout type="warn" title="Performance Note">
+Auto-boxing creates objects. In hot paths, prefer primitive arrays (`int[]`) over boxed collections (`List<Integer>`).
+</Callout>
+
+### Null Safety
+
+Reference types can be `null`; primitives cannot:
+
+```java
+Integer maybeNull = null;  // valid
+int neverNull = null;      // compile error
+
+// NullPointerException risk during unboxing
+int value = maybeNull;     // throws NPE if maybeNull is null
+```
+
+<Callout type="info" title="Go delta">
+Go has zero values for all types. Java primitives have zero values, but reference types default to `null`, not an empty struct.
+</Callout>
+
+---
+
+## Constants
+
+Use `final` for constants:
+
+```java
+final int MAX_RETRIES = 3;
+final String API_VERSION = "v2";
+```
+
+For class-level constants, combine `static final`:
+
+```java
+public class Config {
+    public static final int DEFAULT_TIMEOUT_MS = 5000;
+    public static final String BASE_URL = "https://api.example.com";
+}
+```
+
+---
+
+## Type Inference Limitations
+
+`var` cannot be used for:
+- Method parameters
+- Return types
+- Fields (instance or static)
+- Uninitialized variables
+
+```java
+// These don't compile
+var field;                    // no initializer
+public var getName() { ... }  // return type
+public void process(var x)    // parameter
+```

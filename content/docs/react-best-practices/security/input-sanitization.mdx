@@ -1,0 +1,883 @@
+---
+title: Input Sanitization
+description: Validate and sanitize user inputs in React applications
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## Client vs Server Validation
+
+Both are necessary. They serve different purposes.
+
+| Aspect | Client Validation | Server Validation |
+|--------|-------------------|-------------------|
+| Purpose | UX improvement | Security |
+| Bypassable | Yes (DevTools) | No |
+| Feedback speed | Instant | Network delay |
+| Required | Optional | Mandatory |
+
+```tsx
+// Client: Immediate feedback
+function EmailInput() {
+  const [email, setEmail] = useState('');
+  const [error, setError] = useState('');
+
+  const validateEmail = (value: string) => {
+    if (!value.includes('@')) {
+      setError('Please enter a valid email');
+      return false;
+    }
+    setError('');
+    return true;
+  };
+
+  return (
+    <div>
+      <input
+        type="email"
+        value={email}
+        onChange={(e) => {
+          setEmail(e.target.value);
+          validateEmail(e.target.value);
+        }}
+      />
+      {error && <span className="error">{error}</span>}
+    </div>
+  );
+}
+```
+
+<Callout type="warn">
+Never trust client-side validation alone. All validation must be duplicated on the server.
+</Callout>
+
+---
+
+## Input Type Constraints
+
+Use HTML5 input types for basic browser-level validation.
+
+### Input Types Reference
+
+| Type | Validation | Best For |
+|------|------------|----------|
+| `text` | None | General text |
+| `email` | Basic format | Email addresses |
+| `url` | Basic format | URLs |
+| `tel` | None (pattern needed) | Phone numbers |
+| `number` | Numeric only | Numbers |
+| `date` | Date format | Dates |
+| `password` | None | Passwords |
+
+```tsx
+interface FormData {
+  email: string;
+  age: number;
+  website: string;
+  birthdate: string;
+}
+
+function ConstrainedForm() {
+  const [formData, setFormData] = useState<FormData>({
+    email: '',
+    age: 0,
+    website: '',
+    birthdate: '',
+  });
+
+  const handleChange = (field: keyof FormData) => (
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const value = e.target.type === 'number'
+      ? Number(e.target.value)
+      : e.target.value;
+    setFormData(prev => ({ ...prev, [field]: value }));
+  };
+
+  return (
+    <form>
+      <input
+        type="email"
+        value={formData.email}
+        onChange={handleChange('email')}
+        required
+      />
+      <input
+        type="number"
+        value={formData.age}
+        onChange={handleChange('age')}
+        min={0}
+        max={150}
+      />
+      <input
+        type="url"
+        value={formData.website}
+        onChange={handleChange('website')}
+        placeholder="https://example.com"
+      />
+      <input
+        type="date"
+        value={formData.birthdate}
+        onChange={handleChange('birthdate')}
+        max={new Date().toISOString().split('T')[0]}
+      />
+    </form>
+  );
+}
+```
+
+---
+
+## Regex Validation
+
+### Common Validation Patterns
+
+```tsx
+const VALIDATION_PATTERNS = {
+  // Alphanumeric only
+  alphanumeric: /^[a-zA-Z0-9]+$/,
+
+  // Username: letters, numbers, underscore, 3-20 chars
+  username: /^[a-zA-Z0-9_]{3,20}$/,
+
+  // Slug: lowercase letters, numbers, hyphens
+  slug: /^[a-z0-9]+(?:-[a-z0-9]+)*$/,
+
+  // No special characters
+  noSpecialChars: /^[a-zA-Z0-9\s]+$/,
+
+  // Phone (US format)
+  usPhone: /^\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})$/,
+
+  // Zip code (US)
+  usZip: /^\d{5}(-\d{4})?$/,
+
+  // Strong password
+  strongPassword: /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/,
+} as const;
+
+type PatternKey = keyof typeof VALIDATION_PATTERNS;
+
+function usePatternValidation(pattern: PatternKey) {
+  const [value, setValue] = useState('');
+  const [isValid, setIsValid] = useState(true);
+
+  const validate = (input: string) => {
+    setValue(input);
+    setIsValid(VALIDATION_PATTERNS[pattern].test(input));
+  };
+
+  return { value, isValid, validate };
+}
+```
+
+### Validation Hook Usage
+
+```tsx
+function UsernameInput() {
+  const { value, isValid, validate } = usePatternValidation('username');
+
+  return (
+    <div>
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => validate(e.target.value)}
+        aria-invalid={!isValid}
+      />
+      {!isValid && value && (
+        <span className="error">
+          Username must be 3-20 characters, letters/numbers/underscore only
+        </span>
+      )}
+    </div>
+  );
+}
+```
+
+<Callout type="info">
+Keep regex patterns simple. Complex patterns are hard to maintain and can have performance issues with long inputs.
+</Callout>
+
+---
+
+## URL Validation
+
+```tsx
+interface UrlValidationResult {
+  isValid: boolean;
+  protocol: string | null;
+  hostname: string | null;
+  error: string | null;
+}
+
+function validateUrl(input: string): UrlValidationResult {
+  const ALLOWED_PROTOCOLS = ['http:', 'https:'];
+
+  try {
+    // Require protocol
+    if (!input.match(/^https?:\/\//i)) {
+      return {
+        isValid: false,
+        protocol: null,
+        hostname: null,
+        error: 'URL must start with http:// or https://',
+      };
+    }
+
+    const url = new URL(input);
+
+    // Check protocol
+    if (!ALLOWED_PROTOCOLS.includes(url.protocol)) {
+      return {
+        isValid: false,
+        protocol: url.protocol,
+        hostname: null,
+        error: `Invalid protocol: ${url.protocol}`,
+      };
+    }
+
+    // Check for localhost in production
+    if (url.hostname === 'localhost' || url.hostname === '127.0.0.1') {
+      return {
+        isValid: false,
+        protocol: url.protocol,
+        hostname: url.hostname,
+        error: 'Localhost URLs not allowed',
+      };
+    }
+
+    return {
+      isValid: true,
+      protocol: url.protocol,
+      hostname: url.hostname,
+      error: null,
+    };
+  } catch {
+    return {
+      isValid: false,
+      protocol: null,
+      hostname: null,
+      error: 'Invalid URL format',
+    };
+  }
+}
+
+function UrlInput() {
+  const [url, setUrl] = useState('');
+  const [validation, setValidation] = useState<UrlValidationResult | null>(null);
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setUrl(value);
+    if (value) {
+      setValidation(validateUrl(value));
+    } else {
+      setValidation(null);
+    }
+  };
+
+  return (
+    <div>
+      <input
+        type="url"
+        value={url}
+        onChange={handleChange}
+        placeholder="https://example.com"
+      />
+      {validation && !validation.isValid && (
+        <span className="error">{validation.error}</span>
+      )}
+    </div>
+  );
+}
+```
+
+---
+
+## Email Validation
+
+```tsx
+interface EmailValidationResult {
+  isValid: boolean;
+  localPart: string | null;
+  domain: string | null;
+  error: string | null;
+}
+
+function validateEmail(email: string): EmailValidationResult {
+  // Basic format check
+  const parts = email.split('@');
+
+  if (parts.length !== 2) {
+    return {
+      isValid: false,
+      localPart: null,
+      domain: null,
+      error: 'Email must contain exactly one @ symbol',
+    };
+  }
+
+  const [localPart, domain] = parts;
+
+  // Local part validation
+  if (!localPart || localPart.length === 0) {
+    return {
+      isValid: false,
+      localPart,
+      domain,
+      error: 'Email username cannot be empty',
+    };
+  }
+
+  if (localPart.length > 64) {
+    return {
+      isValid: false,
+      localPart,
+      domain,
+      error: 'Email username too long',
+    };
+  }
+
+  // Domain validation
+  if (!domain || domain.length === 0) {
+    return {
+      isValid: false,
+      localPart,
+      domain,
+      error: 'Email domain cannot be empty',
+    };
+  }
+
+  if (!domain.includes('.')) {
+    return {
+      isValid: false,
+      localPart,
+      domain,
+      error: 'Email domain must contain a dot',
+    };
+  }
+
+  // Check for valid domain characters
+  const domainRegex = /^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$/;
+
+  if (!domainRegex.test(domain)) {
+    return {
+      isValid: false,
+      localPart,
+      domain,
+      error: 'Invalid email domain format',
+    };
+  }
+
+  return {
+    isValid: true,
+    localPart,
+    domain,
+    error: null,
+  };
+}
+```
+
+<Callout type="info">
+Email validation on the client is for UX only. The only way to truly validate an email is to send a verification message.
+</Callout>
+
+---
+
+## Number and Date Validation
+
+### Number Validation
+
+```tsx
+interface NumberValidationOptions {
+  min?: number;
+  max?: number;
+  integer?: boolean;
+  positive?: boolean;
+}
+
+function validateNumber(
+  value: string,
+  options: NumberValidationOptions = {}
+): { isValid: boolean; value: number | null; error: string | null } {
+  const num = Number(value);
+
+  if (value === '' || isNaN(num)) {
+    return { isValid: false, value: null, error: 'Must be a valid number' };
+  }
+
+  if (options.integer && !Number.isInteger(num)) {
+    return { isValid: false, value: num, error: 'Must be a whole number' };
+  }
+
+  if (options.positive && num < 0) {
+    return { isValid: false, value: num, error: 'Must be positive' };
+  }
+
+  if (options.min !== undefined && num < options.min) {
+    return { isValid: false, value: num, error: `Must be at least ${options.min}` };
+  }
+
+  if (options.max !== undefined && num > options.max) {
+    return { isValid: false, value: num, error: `Must be at most ${options.max}` };
+  }
+
+  return { isValid: true, value: num, error: null };
+}
+
+function NumberInput({
+  min,
+  max,
+  integer = false
+}: NumberValidationOptions) {
+  const [input, setInput] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setInput(value);
+
+    if (value) {
+      const result = validateNumber(value, { min, max, integer });
+      setError(result.error);
+    } else {
+      setError(null);
+    }
+  };
+
+  return (
+    <div>
+      <input
+        type="number"
+        value={input}
+        onChange={handleChange}
+        min={min}
+        max={max}
+        step={integer ? 1 : 'any'}
+      />
+      {error && <span className="error">{error}</span>}
+    </div>
+  );
+}
+```
+
+### Date Validation
+
+```tsx
+interface DateValidationOptions {
+  minDate?: Date;
+  maxDate?: Date;
+  allowFuture?: boolean;
+  allowPast?: boolean;
+}
+
+function validateDate(
+  value: string,
+  options: DateValidationOptions = {}
+): { isValid: boolean; date: Date | null; error: string | null } {
+  if (!value) {
+    return { isValid: false, date: null, error: 'Date is required' };
+  }
+
+  const date = new Date(value);
+
+  if (isNaN(date.getTime())) {
+    return { isValid: false, date: null, error: 'Invalid date format' };
+  }
+
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+
+  if (options.allowFuture === false && date > now) {
+    return { isValid: false, date, error: 'Future dates not allowed' };
+  }
+
+  if (options.allowPast === false && date < now) {
+    return { isValid: false, date, error: 'Past dates not allowed' };
+  }
+
+  if (options.minDate && date < options.minDate) {
+    return {
+      isValid: false,
+      date,
+      error: `Date must be after ${options.minDate.toLocaleDateString()}`
+    };
+  }
+
+  if (options.maxDate && date > options.maxDate) {
+    return {
+      isValid: false,
+      date,
+      error: `Date must be before ${options.maxDate.toLocaleDateString()}`
+    };
+  }
+
+  return { isValid: true, date, error: null };
+}
+
+function DateInput({ allowFuture = true, allowPast = true }: DateValidationOptions) {
+  const [input, setInput] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setInput(value);
+
+    const result = validateDate(value, { allowFuture, allowPast });
+    setError(result.error);
+  };
+
+  return (
+    <div>
+      <input type="date" value={input} onChange={handleChange} />
+      {error && <span className="error">{error}</span>}
+    </div>
+  );
+}
+```
+
+---
+
+## Preventing Injection Attacks
+
+### SQL Injection (Server-Side Concern)
+
+Client-side cannot prevent SQL injection. However, you can reduce attack surface.
+
+```tsx
+// Validate input format before sending to server
+function sanitizeSearchTerm(term: string): string {
+  // Remove or escape potentially dangerous characters
+  return term
+    .replace(/['"`;\\]/g, '') // Remove quotes and semicolons
+    .trim()
+    .slice(0, 100); // Limit length
+}
+
+function SearchInput({ onSearch }: { onSearch: (term: string) => void }) {
+  const [term, setTerm] = useState('');
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const sanitized = sanitizeSearchTerm(term);
+    onSearch(sanitized);
+  };
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <input
+        type="text"
+        value={term}
+        onChange={(e) => setTerm(e.target.value)}
+        maxLength={100}
+      />
+      <button type="submit">Search</button>
+    </form>
+  );
+}
+```
+
+### Command Injection Prevention
+
+```tsx
+// Allowlist approach for any user input that affects system operations
+type AllowedCommand = 'list' | 'status' | 'info';
+
+function isAllowedCommand(input: string): input is AllowedCommand {
+  const allowed: AllowedCommand[] = ['list', 'status', 'info'];
+  return allowed.includes(input as AllowedCommand);
+}
+
+function CommandSelector({
+  onSelect
+}: {
+  onSelect: (cmd: AllowedCommand) => void;
+}) {
+  const handleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const value = e.target.value;
+    if (isAllowedCommand(value)) {
+      onSelect(value);
+    }
+  };
+
+  return (
+    <select onChange={handleChange}>
+      <option value="">Select command</option>
+      <option value="list">List</option>
+      <option value="status">Status</option>
+      <option value="info">Info</option>
+    </select>
+  );
+}
+```
+
+---
+
+## Display vs Storage Sanitization
+
+| Stage | Purpose | Actions |
+|-------|---------|---------|
+| Input | UX, basic validation | Format checking, length limits |
+| Storage | Data integrity | Server-side validation, type coercion |
+| Display | XSS prevention | HTML escaping, URL validation |
+
+### Input Stage
+
+```tsx
+function sanitizeForInput(input: string): string {
+  return input
+    .trim()
+    .slice(0, 1000) // Reasonable length limit
+    .replace(/\s+/g, ' '); // Normalize whitespace
+}
+```
+
+### Display Stage
+
+```tsx
+function sanitizeForDisplay(text: string): string {
+  const div = document.createElement('div');
+  div.textContent = text; // Auto-escapes HTML
+  return div.innerHTML;
+}
+
+// Or use React's built-in escaping
+function SafeDisplay({ text }: { text: string }) {
+  // React automatically escapes this
+  return <span>{text}</span>;
+}
+```
+
+### Context-Specific Sanitization
+
+```tsx
+interface SanitizationContext {
+  type: 'text' | 'url' | 'email' | 'html';
+}
+
+function sanitizeByContext(input: string, context: SanitizationContext): string {
+  switch (context.type) {
+    case 'text':
+      return input.trim().slice(0, 10000);
+
+    case 'url':
+      try {
+        const url = new URL(input);
+        if (!['http:', 'https:'].includes(url.protocol)) {
+          return '';
+        }
+        return url.toString();
+      } catch {
+        return '';
+      }
+
+    case 'email':
+      const emailLower = input.toLowerCase().trim();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailLower)) {
+        return '';
+      }
+      return emailLower;
+
+    case 'html':
+      // Strip all HTML tags
+      return input.replace(/<[^>]*>/g, '');
+
+    default:
+      return input;
+  }
+}
+```
+
+---
+
+## Complete Form Example
+
+```tsx
+interface FormState {
+  username: string;
+  email: string;
+  website: string;
+  age: string;
+  bio: string;
+}
+
+interface FormErrors {
+  username?: string;
+  email?: string;
+  website?: string;
+  age?: string;
+  bio?: string;
+}
+
+function validateForm(data: FormState): FormErrors {
+  const errors: FormErrors = {};
+
+  // Username
+  if (!VALIDATION_PATTERNS.username.test(data.username)) {
+    errors.username = 'Username must be 3-20 alphanumeric characters';
+  }
+
+  // Email
+  const emailResult = validateEmail(data.email);
+  if (!emailResult.isValid) {
+    errors.email = emailResult.error || 'Invalid email';
+  }
+
+  // Website (optional)
+  if (data.website) {
+    const urlResult = validateUrl(data.website);
+    if (!urlResult.isValid) {
+      errors.website = urlResult.error || 'Invalid URL';
+    }
+  }
+
+  // Age
+  const ageResult = validateNumber(data.age, { min: 13, max: 120, integer: true });
+  if (!ageResult.isValid) {
+    errors.age = ageResult.error || 'Invalid age';
+  }
+
+  // Bio
+  if (data.bio.length > 500) {
+    errors.bio = 'Bio must be 500 characters or less';
+  }
+
+  return errors;
+}
+
+function RegistrationForm() {
+  const [formData, setFormData] = useState<FormState>({
+    username: '',
+    email: '',
+    website: '',
+    age: '',
+    bio: '',
+  });
+  const [errors, setErrors] = useState<FormErrors>({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const handleChange = (
+    field: keyof FormState
+  ) => (
+    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
+  ) => {
+    setFormData(prev => ({ ...prev, [field]: e.target.value }));
+    // Clear error on change
+    setErrors(prev => ({ ...prev, [field]: undefined }));
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    const validationErrors = validateForm(formData);
+
+    if (Object.keys(validationErrors).length > 0) {
+      setErrors(validationErrors);
+      return;
+    }
+
+    setIsSubmitting(true);
+
+    // Send to server (server must validate again)
+    try {
+      await submitToServer(formData);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit} noValidate>
+      <div>
+        <label htmlFor="username">Username</label>
+        <input
+          id="username"
+          type="text"
+          value={formData.username}
+          onChange={handleChange('username')}
+          aria-invalid={!!errors.username}
+          maxLength={20}
+        />
+        {errors.username && <span className="error">{errors.username}</span>}
+      </div>
+
+      <div>
+        <label htmlFor="email">Email</label>
+        <input
+          id="email"
+          type="email"
+          value={formData.email}
+          onChange={handleChange('email')}
+          aria-invalid={!!errors.email}
+        />
+        {errors.email && <span className="error">{errors.email}</span>}
+      </div>
+
+      <div>
+        <label htmlFor="website">Website (optional)</label>
+        <input
+          id="website"
+          type="url"
+          value={formData.website}
+          onChange={handleChange('website')}
+          aria-invalid={!!errors.website}
+          placeholder="https://"
+        />
+        {errors.website && <span className="error">{errors.website}</span>}
+      </div>
+
+      <div>
+        <label htmlFor="age">Age</label>
+        <input
+          id="age"
+          type="number"
+          value={formData.age}
+          onChange={handleChange('age')}
+          aria-invalid={!!errors.age}
+          min={13}
+          max={120}
+        />
+        {errors.age && <span className="error">{errors.age}</span>}
+      </div>
+
+      <div>
+        <label htmlFor="bio">Bio</label>
+        <textarea
+          id="bio"
+          value={formData.bio}
+          onChange={handleChange('bio')}
+          aria-invalid={!!errors.bio}
+          maxLength={500}
+        />
+        {errors.bio && <span className="error">{errors.bio}</span>}
+        <span className="char-count">{formData.bio.length}/500</span>
+      </div>
+
+      <button type="submit" disabled={isSubmitting}>
+        {isSubmitting ? 'Submitting...' : 'Register'}
+      </button>
+    </form>
+  );
+}
+
+async function submitToServer(data: FormState): Promise<void> {
+  // Implementation
+}
+```
+
+---
+
+## Summary
+
+| Validation Type | Client Purpose | Server Required |
+|-----------------|----------------|-----------------|
+| Format (email, URL) | UX feedback | Yes |
+| Length limits | Prevent abuse | Yes |
+| Pattern matching | UX feedback | Yes |
+| Business rules | UX feedback | Yes |
+| Security checks | Defense in depth | Yes (primary) |
+
+<Callout type="warn">
+All client-side validation is for user experience only. Never rely on it for security. Always validate on the server.
+</Callout>

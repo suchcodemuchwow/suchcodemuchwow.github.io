@@ -1,0 +1,337 @@
+---
+title: Semantic HTML in React
+description: Use correct HTML elements to improve accessibility, SEO, and code maintainability in React applications.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## Why Semantic HTML Matters
+
+Semantic HTML provides meaning to content, enabling assistive technologies to interpret and navigate your application correctly.
+
+## Interactive Elements
+
+### Button vs Div
+
+| Element | Use Case |
+|---------|----------|
+| `<button>` | Triggers an action (submit, toggle, open modal) |
+| `<a>` | Navigates to a URL or anchor |
+| `<div>` | Non-interactive container only |
+
+```tsx
+// Correct - uses button for action
+function GoodExample() {
+  const handleClick = () => console.log('clicked');
+
+  return (
+    <button type="button" onClick={handleClick}>
+      Submit
+    </button>
+  );
+}
+
+// Incorrect - div with click handler
+function BadExample() {
+  const handleClick = () => console.log('clicked');
+
+  return (
+    <div onClick={handleClick} role="button" tabIndex={0}>
+      Submit
+    </div>
+  );
+}
+```
+
+<Callout type="warn">
+Using div as a button requires adding `role="button"`, `tabIndex={0}`, and keyboard event handlers. Use `<button>` instead.
+</Callout>
+
+### Links vs Buttons
+
+```tsx
+// Link - navigates somewhere
+<a href="/dashboard">Go to Dashboard</a>
+
+// Button - performs action
+<button type="button" onClick={openModal}>
+  Open Settings
+</button>
+```
+
+## Heading Hierarchy
+
+Headings create a document outline. Screen reader users navigate by headings.
+
+### Rules
+
+1. One `<h1>` per page
+2. No skipping levels (h1 → h3)
+3. Headings reflect content structure, not visual styling
+
+```tsx
+// Correct hierarchy
+function PageLayout() {
+  return (
+    <main>
+      <h1>Product Catalog</h1>
+
+      <section>
+        <h2>Electronics</h2>
+        <h3>Laptops</h3>
+        <h3>Phones</h3>
+      </section>
+
+      <section>
+        <h2>Clothing</h2>
+        <h3>Men's</h3>
+        <h3>Women's</h3>
+      </section>
+    </main>
+  );
+}
+```
+
+<Callout type="info">
+Style headings with CSS, not by choosing heading level. Use `<h2 className="text-sm">` if you need a smaller visual size.
+</Callout>
+
+## Landmarks
+
+Landmarks help screen reader users jump to major sections.
+
+| Element | Purpose |
+|---------|---------|
+| `<header>` | Introductory content, logo, nav |
+| `<nav>` | Navigation links |
+| `<main>` | Primary content (one per page) |
+| `<aside>` | Sidebar, related content |
+| `<footer>` | Footer content |
+| `<section>` | Thematic grouping with heading |
+| `<article>` | Self-contained, distributable content |
+
+```tsx
+function AppLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <>
+      <header>
+        <nav aria-label="Main">
+          <a href="/">Home</a>
+          <a href="/about">About</a>
+        </nav>
+      </header>
+
+      <main>{children}</main>
+
+      <aside aria-label="Related articles">
+        <h2>Related</h2>
+        {/* sidebar content */}
+      </aside>
+
+      <footer>
+        <p>&copy; 2024 Company</p>
+      </footer>
+    </>
+  );
+}
+```
+
+<Callout type="warn">
+Multiple `<nav>` or `<aside>` elements need unique `aria-label` attributes to distinguish them.
+</Callout>
+
+## Lists
+
+Use lists for groups of related items.
+
+```tsx
+// Navigation as list
+function Navigation() {
+  const links = [
+    { href: '/', label: 'Home' },
+    { href: '/products', label: 'Products' },
+    { href: '/contact', label: 'Contact' },
+  ];
+
+  return (
+    <nav>
+      <ul>
+        {links.map((link) => (
+          <li key={link.href}>
+            <a href={link.href}>{link.label}</a>
+          </li>
+        ))}
+      </ul>
+    </nav>
+  );
+}
+
+// Feature list
+function FeatureList() {
+  return (
+    <ul>
+      <li>Fast performance</li>
+      <li>Easy integration</li>
+      <li>24/7 support</li>
+    </ul>
+  );
+}
+
+// Definition list for key-value pairs
+function ProductDetails() {
+  return (
+    <dl>
+      <dt>Price</dt>
+      <dd>$99.99</dd>
+
+      <dt>Availability</dt>
+      <dd>In Stock</dd>
+
+      <dt>SKU</dt>
+      <dd>PRD-12345</dd>
+    </dl>
+  );
+}
+```
+
+## Tables
+
+Use tables for tabular data with proper headers.
+
+```tsx
+function DataTable() {
+  const users = [
+    { id: 1, name: 'Alice', role: 'Admin' },
+    { id: 2, name: 'Bob', role: 'User' },
+  ];
+
+  return (
+    <table>
+      <caption>User Directory</caption>
+      <thead>
+        <tr>
+          <th scope="col">Name</th>
+          <th scope="col">Role</th>
+        </tr>
+      </thead>
+      <tbody>
+        {users.map((user) => (
+          <tr key={user.id}>
+            <td>{user.name}</td>
+            <td>{user.role}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+```
+
+| Attribute | Purpose |
+|-----------|---------|
+| `<caption>` | Table title/description |
+| `scope="col"` | Header applies to column |
+| `scope="row"` | Header applies to row |
+
+<Callout type="warn">
+Never use tables for layout. Use CSS Grid or Flexbox instead.
+</Callout>
+
+## Fragments
+
+Fragments avoid extra DOM nodes but can break semantics.
+
+### When to Use Fragments
+
+```tsx
+// Good - fragment to avoid extra wrapper
+function ListItems() {
+  return (
+    <>
+      <li>Item 1</li>
+      <li>Item 2</li>
+    </>
+  );
+}
+
+// Used within a list
+function List() {
+  return (
+    <ul>
+      <ListItems />
+    </ul>
+  );
+}
+```
+
+### When NOT to Use Fragments
+
+```tsx
+// Bad - lost semantic grouping
+function BadSection() {
+  return (
+    <>
+      <h2>Title</h2>
+      <p>Content</p>
+    </>
+  );
+}
+
+// Good - section provides meaning
+function GoodSection() {
+  return (
+    <section>
+      <h2>Title</h2>
+      <p>Content</p>
+    </section>
+  );
+}
+```
+
+## When Divs Are Acceptable
+
+| Use Case | Example |
+|----------|---------|
+| Styling wrapper | `<div className="card">` |
+| Layout container | `<div className="grid">` |
+| JavaScript hook target | `<div ref={ref}>` |
+| No semantic meaning needed | Generic grouping |
+
+```tsx
+// Acceptable - div for styling/layout
+function Card({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="card">
+      <div className="card-body">
+        {children}
+      </div>
+    </div>
+  );
+}
+
+// Inside the card, use semantic elements
+function ProductCard() {
+  return (
+    <Card>
+      <article>
+        <h3>Product Name</h3>
+        <p>Description</p>
+        <button type="button">Add to Cart</button>
+      </article>
+    </Card>
+  );
+}
+```
+
+## Quick Reference
+
+| Instead of | Use |
+|------------|-----|
+| `<div onClick>` | `<button>` |
+| `<span onClick>` | `<a href>` or `<button>` |
+| `<div class="header">` | `<header>` |
+| `<div class="nav">` | `<nav>` |
+| `<div class="main">` | `<main>` |
+| `<div class="footer">` | `<footer>` |
+| `<b>` for emphasis | `<strong>` |
+| `<i>` for emphasis | `<em>` |

@@ -1,0 +1,17 @@
+{
+  "title": "Java for Developers",
+  "icon": "Coffee",
+  "root": true,
+  "pages": [
+    "---Getting Started---",
+    "index",
+    "---Core Concepts---",
+    "types-and-variables",
+    "classes-and-objects",
+    "exceptions",
+    "---Advanced Topics---",
+    "generics",
+    "concurrency",
+    "streams"
+  ]
+}

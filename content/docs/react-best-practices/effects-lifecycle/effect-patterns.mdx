@@ -1,0 +1,422 @@
+---
+title: Effect Patterns
+description: Mental models and patterns for using useEffect effectively in React
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## Effect Mental Model
+
+Effects are for synchronizing your component with external systems. They run after render and let you "step outside" React.
+
+```tsx
+import { useEffect } from 'react';
+
+// Effect = synchronization with external system
+useEffect(() => {
+  // This code runs after React updates the DOM
+  // Use it to sync with browser APIs, subscriptions, etc.
+
+  return () => {
+    // Cleanup: disconnect from the external system
+  };
+}, [dependencies]);
+```
+
+### What Effects Are For
+
+| Use Effects For | Don't Use Effects For |
+|-----------------|----------------------|
+| DOM manipulation | Transforming data for render |
+| Subscriptions | Event handlers |
+| Data fetching | Initializing state |
+| External API sync | Communicating between components |
+| Browser APIs | Derived calculations |
+
+<Callout type="info">
+If you can calculate something during render, you don't need an effect.
+</Callout>
+
+---
+
+## Synchronization vs Events
+
+Effects handle synchronization. Event handlers handle user interactions.
+
+### Event Handler Approach
+
+```tsx
+function SearchForm() {
+  const [query, setQuery] = useState('');
+
+  // Event: user clicks button
+  const handleSubmit = async () => {
+    const results = await searchAPI(query);
+    setResults(results);
+  };
+
+  return (
+    <form onSubmit={e => { e.preventDefault(); handleSubmit(); }}>
+      <input value={query} onChange={e => setQuery(e.target.value)} />
+      <button type="submit">Search</button>
+    </form>
+  );
+}
+```
+
+### Effect Approach
+
+```tsx
+function UserProfile({ userId }: { userId: string }) {
+  const [user, setUser] = useState<User | null>(null);
+
+  // Sync: keep user data synchronized with userId
+  useEffect(() => {
+    const controller = new AbortController();
+
+    fetch(`/api/users/${userId}`, { signal: controller.signal })
+      .then(res => res.json())
+      .then(setUser);
+
+    return () => controller.abort();
+  }, [userId]);
+
+  return <div>{user?.name}</div>;
+}
+```
+
+### Decision Guide
+
+| Question | If Yes | If No |
+|----------|--------|-------|
+| Does it respond to user action? | Event handler | Consider effect |
+| Should it run when props change? | Effect | Event handler |
+| Does it need cleanup on unmount? | Effect | Depends |
+| Is it a side effect of rendering? | Effect | Event handler |
+
+---
+
+## Effect Events (Experimental)
+
+React's experimental `useEffectEvent` separates reactive and non-reactive logic.
+
+<Callout type="warn">
+This is an experimental API. Not yet available in stable React.
+</Callout>
+
+```tsx
+import { useEffect, useEffectEvent } from 'react';
+
+function ChatRoom({ roomId, theme }: { roomId: string; theme: string }) {
+  // Non-reactive: theme changes shouldn't reconnect
+  const onConnected = useEffectEvent(() => {
+    showNotification('Connected!', theme);
+  });
+
+  // Reactive: reconnect when roomId changes
+  useEffect(() => {
+    const connection = createConnection(roomId);
+    connection.on('connected', onConnected);
+    connection.connect();
+    return () => connection.disconnect();
+  }, [roomId]); // theme not needed in deps
+}
+```
+
+### Workaround Without useEffectEvent
+
+```tsx
+function ChatRoom({ roomId, theme }: { roomId: string; theme: string }) {
+  const themeRef = useRef(theme);
+
+  // Keep ref updated
+  useEffect(() => {
+    themeRef.current = theme;
+  });
+
+  useEffect(() => {
+    const connection = createConnection(roomId);
+    connection.on('connected', () => {
+      showNotification('Connected!', themeRef.current);
+    });
+    connection.connect();
+    return () => connection.disconnect();
+  }, [roomId]);
+}
+```
+
+---
+
+## One Effect vs Multiple Effects
+
+Split effects by concern, not by lifecycle.
+
+### Multiple Effects (Preferred)
+
+```tsx
+function Dashboard({ userId, teamId }: Props) {
+  const [user, setUser] = useState<User | null>(null);
+  const [team, setTeam] = useState<Team | null>(null);
+
+  // Effect 1: Sync user data
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch(`/api/users/${userId}`, { signal: controller.signal })
+      .then(res => res.json())
+      .then(setUser);
+    return () => controller.abort();
+  }, [userId]);
+
+  // Effect 2: Sync team data
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch(`/api/teams/${teamId}`, { signal: controller.signal })
+      .then(res => res.json())
+      .then(setTeam);
+    return () => controller.abort();
+  }, [teamId]);
+
+  // Effect 3: Document title
+  useEffect(() => {
+    document.title = user ? `${user.name}'s Dashboard` : 'Dashboard';
+  }, [user]);
+}
+```
+
+### Single Effect (Anti-pattern)
+
+```tsx
+// Don't do this - mixing unrelated concerns
+useEffect(() => {
+  fetchUser(userId).then(setUser);
+  fetchTeam(teamId).then(setTeam);
+  document.title = 'Dashboard';
+}, [userId, teamId]); // Any change re-runs everything
+```
+
+### When to Combine Effects
+
+| Combine When | Split When |
+|--------------|------------|
+| Operations must happen together | Operations are independent |
+| Shared cleanup logic | Different dependencies |
+| Sequential operations | Different external systems |
+| Same external system | Different lifecycle needs |
+
+---
+
+## Effect Dependencies
+
+Dependencies tell React when to re-run your effect.
+
+### Dependency Rules
+
+```tsx
+function Example({ userId }: { userId: string }) {
+  const [data, setData] = useState(null);
+
+  useEffect(() => {
+    // All values used inside must be in deps
+    fetchData(userId).then(setData);
+  }, [userId]); // userId is used, so it's a dependency
+}
+```
+
+### Common Dependency Patterns
+
+```tsx
+// Run once on mount
+useEffect(() => {
+  initializeSDK();
+}, []);
+
+// Run when specific prop changes
+useEffect(() => {
+  loadUser(userId);
+}, [userId]);
+
+// Run when multiple values change
+useEffect(() => {
+  searchProducts(query, category);
+}, [query, category]);
+
+// Run on every render (usually wrong)
+useEffect(() => {
+  // No dependency array = runs every render
+});
+```
+
+<Callout type="warn">
+Never lie about dependencies. If your effect uses a value, include it. Fix the code if that causes issues, don't omit the dependency.
+</Callout>
+
+---
+
+## Objects and Functions in Dependencies
+
+Objects and functions create new references each render.
+
+### Problem: New Reference Each Render
+
+```tsx
+function SearchResults({ filters }: { filters: Filters }) {
+  // filters object is new each render
+  useEffect(() => {
+    fetchResults(filters);
+  }, [filters]); // Runs every render!
+}
+```
+
+### Solution 1: Destructure Primitive Values
+
+```tsx
+function SearchResults({ filters }: { filters: Filters }) {
+  const { category, minPrice, maxPrice } = filters;
+
+  useEffect(() => {
+    fetchResults({ category, minPrice, maxPrice });
+  }, [category, minPrice, maxPrice]); // Primitives are stable
+}
+```
+
+### Solution 2: Move Object Creation Inside Effect
+
+```tsx
+function SearchResults({ category, minPrice }: Props) {
+  useEffect(() => {
+    const filters = { category, minPrice }; // Create inside
+    fetchResults(filters);
+  }, [category, minPrice]);
+}
+```
+
+### Solution 3: useMemo for Complex Objects
+
+```tsx
+function SearchResults({ rawFilters }: Props) {
+  const filters = useMemo(
+    () => processFilters(rawFilters),
+    [rawFilters.category, rawFilters.minPrice]
+  );
+
+  useEffect(() => {
+    fetchResults(filters);
+  }, [filters]);
+}
+```
+
+### Functions in Dependencies
+
+```tsx
+// Problem: new function each render
+function Component({ userId }: Props) {
+  const fetchUser = () => fetch(`/api/users/${userId}`);
+
+  useEffect(() => {
+    fetchUser();
+  }, [fetchUser]); // New function = infinite loop
+}
+
+// Solution: useCallback or move inside effect
+function Component({ userId }: Props) {
+  useEffect(() => {
+    const fetchUser = () => fetch(`/api/users/${userId}`);
+    fetchUser();
+  }, [userId]); // Stable primitive dependency
+}
+```
+
+---
+
+## When Effects Are the Wrong Choice
+
+### Deriving State During Render
+
+```tsx
+// Wrong: effect for derived data
+function FilteredList({ items, filter }: Props) {
+  const [filtered, setFiltered] = useState<Item[]>([]);
+
+  useEffect(() => {
+    setFiltered(items.filter(item => item.name.includes(filter)));
+  }, [items, filter]);
+
+  return <List items={filtered} />;
+}
+
+// Right: calculate during render
+function FilteredList({ items, filter }: Props) {
+  const filtered = items.filter(item => item.name.includes(filter));
+  return <List items={filtered} />;
+}
+```
+
+### Resetting State on Prop Change
+
+```tsx
+// Wrong: effect to reset state
+function ProfileEditor({ userId }: Props) {
+  const [draft, setDraft] = useState('');
+
+  useEffect(() => {
+    setDraft('');
+  }, [userId]);
+}
+
+// Right: use key to reset component
+function ProfilePage({ userId }: Props) {
+  return <ProfileEditor key={userId} />;
+}
+```
+
+### Responding to Events
+
+```tsx
+// Wrong: effect for event response
+function Form() {
+  const [submitted, setSubmitted] = useState(false);
+
+  useEffect(() => {
+    if (submitted) {
+      showConfirmation();
+    }
+  }, [submitted]);
+}
+
+// Right: handle in event handler
+function Form() {
+  const handleSubmit = () => {
+    submitForm();
+    showConfirmation();
+  };
+}
+```
+
+### Communicating with Parents
+
+```tsx
+// Wrong: effect to notify parent
+function Child({ onReady }: Props) {
+  useEffect(() => {
+    onReady();
+  }, [onReady]);
+}
+
+// Right: call in event handler or pass data directly
+function Child({ onSelect }: Props) {
+  const handleClick = (item: Item) => {
+    onSelect(item); // Direct communication
+  };
+}
+```
+
+### Summary: Effect Alternatives
+
+| Instead of Effect | Use |
+|-------------------|-----|
+| Transform data for render | Calculate during render |
+| Reset state on prop change | Key prop |
+| Handle user events | Event handlers |
+| Notify parent | Callback in event handler |
+| Initialize state | Initializer function |
+| Buy/sell in store | useSyncExternalStore |

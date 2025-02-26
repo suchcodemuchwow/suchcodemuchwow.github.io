@@ -1,0 +1,524 @@
+---
+title: Children Patterns
+description: Patterns for composing React components using children
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## Children Prop Types
+
+### Basic Types
+
+```tsx
+import { ReactNode, ReactElement, PropsWithChildren } from 'react';
+
+// ReactNode: most flexible - strings, numbers, elements, arrays, null
+interface CardProps {
+  children: ReactNode;
+}
+
+// ReactElement: only React elements (no strings/numbers)
+interface StrictCardProps {
+  children: ReactElement;
+}
+
+// PropsWithChildren: utility type adds optional children
+type ButtonProps = PropsWithChildren<{
+  onClick: () => void;
+}>;
+// Equivalent to: { onClick: () => void; children?: ReactNode }
+```
+
+| Type | Accepts | Use When |
+|------|---------|----------|
+| `ReactNode` | Elements, strings, numbers, arrays, null, undefined | Most cases |
+| `ReactElement` | Only React elements | Need to inspect/clone children |
+| `ReactElement[]` | Array of elements | Need to map/filter children |
+| `string` | Only strings | Text-only content |
+| `never` | Nothing | Component should not accept children |
+
+### Restricting Children
+
+```tsx
+// No children allowed
+interface IconProps {
+  name: string;
+  children?: never;
+}
+
+function Icon({ name }: IconProps) {
+  return <svg>{/* ... */}</svg>;
+}
+
+<Icon name="star" />           // Valid
+<Icon name="star">text</Icon>  // TypeScript error
+```
+
+---
+
+## React.Children Utilities
+
+React provides utilities for working with the opaque `children` prop.
+
+### Counting and Iterating
+
+```tsx
+import { Children, ReactNode } from 'react';
+
+interface TabsProps {
+  children: ReactNode;
+}
+
+function Tabs({ children }: TabsProps) {
+  const count = Children.count(children);
+
+  return (
+    <div>
+      <div className="tab-count">({count} tabs)</div>
+      <div className="tab-list">
+        {Children.map(children, (child, index) => (
+          <div key={index} className="tab">
+            {child}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+```
+
+### Available Utilities
+
+| Utility | Purpose | Note |
+|---------|---------|------|
+| `Children.map(children, fn)` | Map over children | Handles null/undefined safely |
+| `Children.forEach(children, fn)` | Iterate without returning | No return value |
+| `Children.count(children)` | Count children | Handles fragments |
+| `Children.only(children)` | Assert single child | Throws if not exactly one |
+| `Children.toArray(children)` | Convert to flat array | Useful for sorting/filtering |
+
+<Callout type="warn" title="Fragility Warning">
+`Children` utilities don't see inside fragments or components. They only work with direct children. Consider other patterns for more robust solutions.
+</Callout>
+
+---
+
+## Render Props via Children
+
+Pass a function as children for flexible rendering control.
+
+```tsx
+interface DataFetcherProps<T> {
+  url: string;
+  children: (data: T | null, isLoading: boolean, error: Error | null) => ReactNode;
+}
+
+function DataFetcher<T>({ url, children }: DataFetcherProps<T>) {
+  const [data, setData] = useState<T | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+
+  useEffect(() => {
+    setIsLoading(true);
+    fetch(url)
+      .then(res => res.json())
+      .then(setData)
+      .catch(setError)
+      .finally(() => setIsLoading(false));
+  }, [url]);
+
+  return <>{children(data, isLoading, error)}</>;
+}
+
+// Usage
+<DataFetcher<User[]> url="/api/users">
+  {(users, isLoading, error) => {
+    if (isLoading) return <Spinner />;
+    if (error) return <ErrorMessage error={error} />;
+    return <UserList users={users!} />;
+  }}
+</DataFetcher>
+```
+
+### When to Use Render Props
+
+| Use Render Props | Use Regular Children |
+|------------------|---------------------|
+| Parent provides data to children | Static content composition |
+| Dynamic rendering based on state | Simple nesting |
+| Inverting control to consumer | When hooks can replace it |
+
+<Callout type="info" title="Hooks Alternative">
+Render props were common before hooks. For most cases, prefer a custom hook that returns the data/state.
+</Callout>
+
+---
+
+## Slot Patterns
+
+Slots let you inject content into specific places in a component.
+
+### Named Props as Slots
+
+```tsx
+interface PageLayoutProps {
+  header: ReactNode;
+  sidebar: ReactNode;
+  children: ReactNode;
+  footer?: ReactNode;
+}
+
+function PageLayout({ header, sidebar, children, footer }: PageLayoutProps) {
+  return (
+    <div className="page">
+      <header className="page-header">{header}</header>
+      <aside className="page-sidebar">{sidebar}</aside>
+      <main className="page-content">{children}</main>
+      {footer && <footer className="page-footer">{footer}</footer>}
+    </div>
+  );
+}
+
+// Usage
+<PageLayout
+  header={<NavBar />}
+  sidebar={<MenuList items={menuItems} />}
+  footer={<Copyright />}
+>
+  <Article content={content} />
+</PageLayout>
+```
+
+### Compound Component Slots
+
+```tsx
+interface DialogProps {
+  children: ReactNode;
+}
+
+interface DialogSlotProps {
+  children: ReactNode;
+}
+
+function Dialog({ children }: DialogProps) {
+  return <div className="dialog">{children}</div>;
+}
+
+Dialog.Header = function DialogHeader({ children }: DialogSlotProps) {
+  return <div className="dialog-header">{children}</div>;
+};
+
+Dialog.Body = function DialogBody({ children }: DialogSlotProps) {
+  return <div className="dialog-body">{children}</div>;
+};
+
+Dialog.Footer = function DialogFooter({ children }: DialogSlotProps) {
+  return <div className="dialog-footer">{children}</div>;
+};
+
+// Usage
+<Dialog>
+  <Dialog.Header>
+    <h2>Confirm Action</h2>
+  </Dialog.Header>
+  <Dialog.Body>
+    <p>Are you sure you want to proceed?</p>
+  </Dialog.Body>
+  <Dialog.Footer>
+    <Button onClick={onCancel}>Cancel</Button>
+    <Button onClick={onConfirm}>Confirm</Button>
+  </Dialog.Footer>
+</Dialog>
+```
+
+### Extracting Slots from Children
+
+```tsx
+import { Children, isValidElement, ReactNode, ReactElement } from 'react';
+
+interface CardProps {
+  children: ReactNode;
+}
+
+function Card({ children }: CardProps) {
+  let header: ReactNode = null;
+  let footer: ReactNode = null;
+  const body: ReactNode[] = [];
+
+  Children.forEach(children, child => {
+    if (isValidElement(child)) {
+      if (child.type === CardHeader) {
+        header = child;
+      } else if (child.type === CardFooter) {
+        footer = child;
+      } else {
+        body.push(child);
+      }
+    } else {
+      body.push(child);
+    }
+  });
+
+  return (
+    <div className="card">
+      {header}
+      <div className="card-body">{body}</div>
+      {footer}
+    </div>
+  );
+}
+
+function CardHeader({ children }: { children: ReactNode }) {
+  return <div className="card-header">{children}</div>;
+}
+
+function CardFooter({ children }: { children: ReactNode }) {
+  return <div className="card-footer">{children}</div>;
+}
+
+Card.Header = CardHeader;
+Card.Footer = CardFooter;
+```
+
+---
+
+## Children Manipulation
+
+### cloneElement
+
+Add or override props on children elements.
+
+```tsx
+import { Children, cloneElement, isValidElement, ReactElement, ReactNode } from 'react';
+
+interface RadioGroupProps {
+  name: string;
+  value: string;
+  onChange: (value: string) => void;
+  children: ReactNode;
+}
+
+function RadioGroup({ name, value, onChange, children }: RadioGroupProps) {
+  return (
+    <div role="radiogroup">
+      {Children.map(children, child => {
+        if (isValidElement(child)) {
+          return cloneElement(child as ReactElement<RadioProps>, {
+            name,
+            checked: child.props.value === value,
+            onChange: () => onChange(child.props.value),
+          });
+        }
+        return child;
+      })}
+    </div>
+  );
+}
+
+interface RadioProps {
+  value: string;
+  label: string;
+  name?: string;
+  checked?: boolean;
+  onChange?: () => void;
+}
+
+function Radio({ value, label, name, checked, onChange }: RadioProps) {
+  return (
+    <label>
+      <input
+        type="radio"
+        name={name}
+        value={value}
+        checked={checked}
+        onChange={onChange}
+      />
+      {label}
+    </label>
+  );
+}
+
+// Usage
+<RadioGroup name="size" value={size} onChange={setSize}>
+  <Radio value="sm" label="Small" />
+  <Radio value="md" label="Medium" />
+  <Radio value="lg" label="Large" />
+</RadioGroup>
+```
+
+<Callout type="warn" title="cloneElement Pitfalls">
+`cloneElement` is fragile. It assumes children have specific props and types. Prefer Context or explicit props when possible.
+</Callout>
+
+### Filtering and Sorting Children
+
+```tsx
+import { Children, isValidElement, ReactNode } from 'react';
+
+interface FilteredListProps {
+  children: ReactNode;
+  showHidden?: boolean;
+}
+
+function FilteredList({ children, showHidden = false }: FilteredListProps) {
+  const filtered = Children.toArray(children).filter(child => {
+    if (!isValidElement(child)) return true;
+    if (child.props.hidden && !showHidden) return false;
+    return true;
+  });
+
+  return <ul>{filtered}</ul>;
+}
+
+// Sorting children
+interface SortedListProps {
+  children: ReactNode;
+  sortBy: 'asc' | 'desc';
+}
+
+function SortedList({ children, sortBy }: SortedListProps) {
+  const sorted = Children.toArray(children).sort((a, b) => {
+    if (!isValidElement(a) || !isValidElement(b)) return 0;
+    const comparison = (a.props.order ?? 0) - (b.props.order ?? 0);
+    return sortBy === 'desc' ? -comparison : comparison;
+  });
+
+  return <ul>{sorted}</ul>;
+}
+```
+
+---
+
+## Children vs Named Props
+
+### When to Use children
+
+```tsx
+// Good: wrapping content
+function Card({ children }: { children: ReactNode }) {
+  return <div className="card">{children}</div>;
+}
+
+// Good: single content area
+function Modal({ children, title }: ModalProps) {
+  return (
+    <div className="modal">
+      <h2>{title}</h2>
+      {children}
+    </div>
+  );
+}
+
+// Good: composition
+function Layout({ children }: { children: ReactNode }) {
+  return (
+    <div className="layout">
+      <Header />
+      <main>{children}</main>
+      <Footer />
+    </div>
+  );
+}
+```
+
+### When to Use Named Props
+
+```tsx
+// Multiple content slots
+interface PageProps {
+  header: ReactNode;
+  sidebar: ReactNode;
+  content: ReactNode;
+}
+
+// Content needs specific types
+interface TabProps {
+  tabs: Array<{ id: string; label: string; content: ReactNode }>;
+}
+
+// Content needs to be processed
+interface ListProps {
+  items: Array<{ id: string; name: string }>;
+  renderItem: (item: Item) => ReactNode;
+}
+```
+
+| Use children | Use Named Props |
+|--------------|-----------------|
+| Single content slot | Multiple content slots |
+| Standard composition | Need specific types/structure |
+| Content just needs rendering | Content needs processing |
+| Familiar JSX nesting | More explicit API |
+
+---
+
+## Patterns Comparison
+
+| Pattern | Use Case | Complexity |
+|---------|----------|------------|
+| Simple children | Basic composition | Low |
+| Named slot props | Multiple content areas | Low |
+| Compound components | Related sub-components | Medium |
+| Render props | Parent provides data | Medium |
+| cloneElement | Inject props to children | High (fragile) |
+| Children.map/filter | Transform children | High (fragile) |
+
+<Callout type="info" title="Recommendation">
+Start with simple children or named props. Use compound components for component suites. Reserve children manipulation for special cases like animation libraries or form libraries.
+</Callout>
+
+---
+
+## Anti-Patterns
+
+### Don't Use Children for Data
+
+```tsx
+// Bad: passing data as children
+<UserCard>John Doe</UserCard>
+
+// Good: explicit props
+<UserCard name="John Doe" />
+```
+
+### Don't Assume Children Structure
+
+```tsx
+// Fragile: assumes exactly 2 children in specific order
+function Split({ children }: { children: ReactNode }) {
+  const [left, right] = Children.toArray(children);
+  return (
+    <div className="split">
+      <div className="left">{left}</div>
+      <div className="right">{right}</div>
+    </div>
+  );
+}
+
+// Better: explicit props
+interface SplitProps {
+  left: ReactNode;
+  right: ReactNode;
+}
+
+function Split({ left, right }: SplitProps) {
+  return (
+    <div className="split">
+      <div className="left">{left}</div>
+      <div className="right">{right}</div>
+    </div>
+  );
+}
+```
+
+### Don't Over-Engineer
+
+```tsx
+// Over-engineered: using render props for simple case
+<If condition={isLoggedIn}>
+  {() => <Dashboard />}
+</If>
+
+// Simple: just use JSX
+{isLoggedIn && <Dashboard />}
+```

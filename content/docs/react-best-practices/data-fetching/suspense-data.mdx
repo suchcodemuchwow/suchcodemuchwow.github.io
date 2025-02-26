@@ -1,0 +1,533 @@
+---
+title: Suspense for Data
+description: Using React Suspense for data fetching with the use() hook and promise-based patterns
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## Overview
+
+React Suspense allows components to "suspend" rendering while waiting for asynchronous data. Instead of managing loading states manually, components can declare data dependencies and let React handle the loading UI.
+
+## Suspense Mental Model
+
+Traditional approach: Components manage their own loading states.
+
+```tsx
+// Traditional: Component manages loading
+function UserProfile({ userId }: { userId: number }) {
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    fetch(`/api/users/${userId}`)
+      .then(res => res.json())
+      .then(data => {
+        setUser(data);
+        setLoading(false);
+      });
+  }, [userId]);
+
+  if (loading) return <Spinner />;
+  return <div>{user?.name}</div>;
+}
+```
+
+Suspense approach: Component declares data dependency, parent handles loading.
+
+```tsx
+// Suspense: Parent handles loading UI
+function App() {
+  return (
+    <Suspense fallback={<Spinner />}>
+      <UserProfile userId={1} />
+    </Suspense>
+  );
+}
+
+// Component just uses data
+function UserProfile({ userId }: { userId: number }) {
+  const user = use(fetchUser(userId));
+  return <div>{user.name}</div>;
+}
+```
+
+### Key Differences
+
+| Aspect | Traditional | Suspense |
+|--------|-------------|----------|
+| Loading state | Component manages | Parent boundary handles |
+| Code location | Scattered in component | Centralized at boundary |
+| Composition | Each component has spinner | Shared loading UI |
+| Mental model | Imperative | Declarative |
+
+## use() Hook (React 19)
+
+The `use()` hook reads values from promises during render. Available in React 19+.
+
+```tsx
+import { use, Suspense } from 'react';
+
+interface User {
+  id: number;
+  name: string;
+  email: string;
+}
+
+// Cache promises to avoid re-fetching
+const userPromiseCache = new Map<number, Promise<User>>();
+
+function fetchUser(userId: number): Promise<User> {
+  if (!userPromiseCache.has(userId)) {
+    const promise = fetch(`/api/users/${userId}`)
+      .then(res => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      });
+    userPromiseCache.set(userId, promise);
+  }
+  return userPromiseCache.get(userId)!;
+}
+
+function UserProfile({ userId }: { userId: number }) {
+  // use() suspends until promise resolves
+  const user = use(fetchUser(userId));
+
+  return (
+    <div>
+      <h2>{user.name}</h2>
+      <p>{user.email}</p>
+    </div>
+  );
+}
+
+function App() {
+  return (
+    <Suspense fallback={<div>Loading user...</div>}>
+      <UserProfile userId={1} />
+    </Suspense>
+  );
+}
+```
+
+<Callout type="warn">
+The promise passed to use() must be cached or memoized. Creating a new promise on each render causes infinite suspense loops.
+</Callout>
+
+### use() with Context
+
+`use()` can also read context values, unlike hooks it can be called conditionally.
+
+```tsx
+import { use, createContext } from 'react';
+
+const ThemeContext = createContext<'light' | 'dark'>('light');
+
+function Button({ showTheme }: { showTheme: boolean }) {
+  // Can call use() conditionally (unlike useContext)
+  if (showTheme) {
+    const theme = use(ThemeContext);
+    return <button className={theme}>Themed Button</button>;
+  }
+
+  return <button>Default Button</button>;
+}
+```
+
+## Throwing Promises (Legacy)
+
+Before `use()`, Suspense for data required throwing promises. This pattern still works but is not recommended for new code.
+
+```tsx
+import { Suspense } from 'react';
+
+type Status = 'pending' | 'fulfilled' | 'rejected';
+
+interface Resource<T> {
+  read(): T;
+}
+
+function createResource<T>(promise: Promise<T>): Resource<T> {
+  let status: Status = 'pending';
+  let result: T;
+  let error: Error;
+
+  const suspender = promise.then(
+    (data) => {
+      status = 'fulfilled';
+      result = data;
+    },
+    (e) => {
+      status = 'rejected';
+      error = e;
+    }
+  );
+
+  return {
+    read() {
+      switch (status) {
+        case 'pending':
+          throw suspender; // Suspense catches this
+        case 'rejected':
+          throw error; // ErrorBoundary catches this
+        case 'fulfilled':
+          return result;
+      }
+    }
+  };
+}
+
+// Usage
+const userResource = createResource(
+  fetch('/api/users/1').then(res => res.json())
+);
+
+function UserProfile() {
+  // Throws promise if pending, throws error if rejected
+  const user = userResource.read();
+
+  return <div>{user.name}</div>;
+}
+
+function App() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <UserProfile />
+    </Suspense>
+  );
+}
+```
+
+### Legacy vs use() Hook
+
+| Feature | Throwing Promises | use() Hook |
+|---------|-------------------|------------|
+| Syntax | Verbose wrapper | Clean, native |
+| Error handling | Manual | Integrated |
+| Caching | Manual | Still manual |
+| React version | 16.6+ | 19+ |
+| Recommended | No | Yes |
+
+## Suspense Boundaries for Data
+
+### Basic Boundary
+
+```tsx
+import { Suspense } from 'react';
+
+function App() {
+  return (
+    <div>
+      <Header />
+      <Suspense fallback={<MainContentSkeleton />}>
+        <MainContent />
+      </Suspense>
+      <Footer />
+    </div>
+  );
+}
+```
+
+### Multiple Boundaries
+
+Separate boundaries allow independent loading states.
+
+```tsx
+import { Suspense } from 'react';
+
+function Dashboard() {
+  return (
+    <div className="dashboard">
+      <Suspense fallback={<UserInfoSkeleton />}>
+        <UserInfo />
+      </Suspense>
+
+      <Suspense fallback={<StatsSkeleton />}>
+        <DashboardStats />
+      </Suspense>
+
+      <Suspense fallback={<ActivitySkeleton />}>
+        <RecentActivity />
+      </Suspense>
+    </div>
+  );
+}
+```
+
+### Single Boundary for Related Data
+
+Group related content under one boundary.
+
+```tsx
+import { Suspense } from 'react';
+
+function UserPage({ userId }: { userId: number }) {
+  return (
+    <div>
+      <Suspense fallback={<UserPageSkeleton />}>
+        {/* All components suspend together */}
+        <UserHeader userId={userId} />
+        <UserPosts userId={userId} />
+        <UserComments userId={userId} />
+      </Suspense>
+    </div>
+  );
+}
+```
+
+<Callout type="info">
+Use separate boundaries for independent data. Use a single boundary when data should load together.
+</Callout>
+
+## Nested Suspense
+
+Suspense boundaries can be nested for progressive loading.
+
+```tsx
+import { Suspense, use } from 'react';
+
+function App() {
+  return (
+    <Suspense fallback={<AppSkeleton />}>
+      <Layout>
+        <Suspense fallback={<SidebarSkeleton />}>
+          <Sidebar />
+        </Suspense>
+
+        <main>
+          <Suspense fallback={<ContentSkeleton />}>
+            <Content>
+              <Suspense fallback={<CommentsSkeleton />}>
+                <Comments />
+              </Suspense>
+            </Content>
+          </Suspense>
+        </main>
+      </Layout>
+    </Suspense>
+  );
+}
+```
+
+### Loading Sequence
+
+With nested Suspense, content reveals progressively:
+
+1. App shell loads first
+2. Sidebar and Content load independently
+3. Comments load after Content
+
+```tsx
+// Timeline visualization:
+// t=0:   [AppSkeleton]
+// t=100: [Layout + SidebarSkeleton + ContentSkeleton]
+// t=200: [Layout + Sidebar + ContentSkeleton]
+// t=300: [Layout + Sidebar + Content + CommentsSkeleton]
+// t=400: [Layout + Sidebar + Content + Comments]
+```
+
+## Error Boundaries with Suspense
+
+Combine Error Boundaries to handle rejected promises.
+
+```tsx
+import { Component, Suspense, use, ReactNode } from 'react';
+
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+}
+
+interface ErrorBoundaryProps {
+  children: ReactNode;
+  fallback: (error: Error, reset: () => void) => ReactNode;
+}
+
+class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  state: ErrorBoundaryState = { hasError: false, error: null };
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { hasError: true, error };
+  }
+
+  reset = () => {
+    this.setState({ hasError: false, error: null });
+  };
+
+  render() {
+    if (this.state.hasError && this.state.error) {
+      return this.props.fallback(this.state.error, this.reset);
+    }
+    return this.props.children;
+  }
+}
+
+// Usage
+function App() {
+  return (
+    <ErrorBoundary
+      fallback={(error, reset) => (
+        <div>
+          <p>Error: {error.message}</p>
+          <button onClick={reset}>Try Again</button>
+        </div>
+      )}
+    >
+      <Suspense fallback={<div>Loading...</div>}>
+        <DataComponent />
+      </Suspense>
+    </ErrorBoundary>
+  );
+}
+```
+
+### Error Boundary Placement
+
+```tsx
+// Option 1: Error boundary outside Suspense
+// - Catches errors from any child, including fallback
+<ErrorBoundary fallback={...}>
+  <Suspense fallback={<Skeleton />}>
+    <DataComponent />
+  </Suspense>
+</ErrorBoundary>
+
+// Option 2: Error boundary inside Suspense
+// - Only catches errors from DataComponent
+<Suspense fallback={<Skeleton />}>
+  <ErrorBoundary fallback={...}>
+    <DataComponent />
+  </ErrorBoundary>
+</Suspense>
+
+// Option 3: Per-component error handling
+<Suspense fallback={<Skeleton />}>
+  <ErrorBoundary fallback={<UserError />}>
+    <UserData />
+  </ErrorBoundary>
+  <ErrorBoundary fallback={<PostsError />}>
+    <PostsData />
+  </ErrorBoundary>
+</Suspense>
+```
+
+## Current Limitations
+
+### No Built-in Caching
+
+Suspense does not cache data. You must implement caching yourself.
+
+```tsx
+// BAD: Creates new promise on each render
+function UserProfile({ userId }: { userId: number }) {
+  // This causes infinite loop!
+  const user = use(fetch(`/api/users/${userId}`).then(r => r.json()));
+  return <div>{user.name}</div>;
+}
+
+// GOOD: Cache the promise
+const cache = new Map<number, Promise<User>>();
+
+function fetchUser(userId: number): Promise<User> {
+  if (!cache.has(userId)) {
+    cache.set(userId, fetch(`/api/users/${userId}`).then(r => r.json()));
+  }
+  return cache.get(userId)!;
+}
+
+function UserProfile({ userId }: { userId: number }) {
+  const user = use(fetchUser(userId));
+  return <div>{user.name}</div>;
+}
+```
+
+### No Request Deduplication
+
+Multiple components requesting the same data trigger multiple fetches without caching.
+
+```tsx
+// Without caching, this fetches twice
+function App() {
+  return (
+    <>
+      <UserName userId={1} />
+      <UserEmail userId={1} />
+    </>
+  );
+}
+
+// Solution: Shared cache
+const userCache = new Map<number, Promise<User>>();
+
+function getUser(userId: number) {
+  if (!userCache.has(userId)) {
+    userCache.set(userId, fetchUser(userId));
+  }
+  return userCache.get(userId)!;
+}
+```
+
+### Cache Invalidation is Manual
+
+```tsx
+// You must manually clear cache
+function invalidateUser(userId: number) {
+  cache.delete(userId);
+}
+
+// And trigger re-render somehow
+function UpdateUserButton({ userId }: { userId: number }) {
+  const [, forceUpdate] = useState({});
+
+  const handleClick = async () => {
+    await updateUserOnServer(userId);
+    invalidateUser(userId);
+    forceUpdate({}); // Force re-render to refetch
+  };
+
+  return <button onClick={handleClick}>Update</button>;
+}
+```
+
+### Summary of Limitations
+
+| Limitation | Impact | Workaround |
+|------------|--------|------------|
+| No caching | Repeated fetches | Manual cache (Map, module-level) |
+| No deduplication | Wasted requests | Shared promise cache |
+| No invalidation | Stale data | Manual cache clearing |
+| No refetching | No background updates | Manual re-fetch triggers |
+| No optimistic updates | Slower perceived performance | Manual state management |
+
+<Callout type="warn">
+Suspense provides the rendering mechanism, not the data fetching solution. For production apps with complex data needs, consider whether the manual caching overhead is worth it.
+</Callout>
+
+## When to Use Suspense for Data
+
+### Good Use Cases
+
+- Server components (Next.js, Remix)
+- Simple, read-only data display
+- Progressive loading of page sections
+- Streaming SSR
+- When using a framework that provides Suspense integration
+
+### When to Avoid
+
+- Complex caching requirements
+- Frequent data mutations
+- Real-time data updates
+- Apps needing optimistic updates
+- When manual state management is clearer for your team
+
+### Decision Matrix
+
+| Scenario | Recommendation |
+|----------|----------------|
+| Server Components | Use Suspense |
+| Simple client fetch | Consider Suspense with manual cache |
+| Complex client data | Manual state or data library |
+| Need mutations | Manual state or data library |
+| Learning React | Start with useEffect, learn Suspense later |

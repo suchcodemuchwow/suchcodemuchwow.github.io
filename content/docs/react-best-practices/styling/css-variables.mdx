@@ -1,0 +1,507 @@
+---
+title: CSS Variables for Theming
+description: Dynamic theming with CSS custom properties in React applications
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## CSS Custom Properties Basics
+
+CSS variables (custom properties) enable dynamic theming without runtime CSS-in-JS overhead.
+
+```css
+/* styles/variables.css */
+:root {
+  --color-primary: #007bff;
+  --color-secondary: #6c757d;
+  --color-background: #ffffff;
+  --color-text: #212529;
+
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 16px;
+  --spacing-lg: 24px;
+
+  --font-size-sm: 14px;
+  --font-size-md: 16px;
+  --font-size-lg: 20px;
+
+  --border-radius: 4px;
+  --shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+```
+
+```css
+/* Button.module.css */
+.button {
+  background: var(--color-primary);
+  color: var(--color-background);
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-radius: var(--border-radius);
+  font-size: var(--font-size-md);
+}
+```
+
+---
+
+## Theme Switching
+
+### CSS-Based Theme Switching
+
+```css
+/* themes.css */
+:root {
+  --color-bg: #ffffff;
+  --color-text: #1a1a1a;
+  --color-primary: #0066cc;
+  --color-surface: #f5f5f5;
+}
+
+[data-theme='dark'] {
+  --color-bg: #1a1a1a;
+  --color-text: #ffffff;
+  --color-primary: #66b3ff;
+  --color-surface: #2d2d2d;
+}
+
+[data-theme='high-contrast'] {
+  --color-bg: #000000;
+  --color-text: #ffffff;
+  --color-primary: #ffff00;
+  --color-surface: #1a1a1a;
+}
+```
+
+### React Theme Provider
+
+```tsx
+import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+
+type Theme = 'light' | 'dark' | 'system';
+
+interface ThemeContextValue {
+  theme: Theme;
+  setTheme: (theme: Theme) => void;
+  resolvedTheme: 'light' | 'dark';
+}
+
+const ThemeContext = createContext<ThemeContextValue | null>(null);
+
+export function ThemeProvider({ children }: { children: ReactNode }) {
+  const [theme, setTheme] = useState<Theme>(() => {
+    if (typeof window === 'undefined') return 'system';
+    return (localStorage.getItem('theme') as Theme) || 'system';
+  });
+
+  const [resolvedTheme, setResolvedTheme] = useState<'light' | 'dark'>('light');
+
+  useEffect(() => {
+    const root = document.documentElement;
+
+    if (theme === 'system') {
+      const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+      const systemTheme = mediaQuery.matches ? 'dark' : 'light';
+      root.setAttribute('data-theme', systemTheme);
+      setResolvedTheme(systemTheme);
+
+      const handler = (e: MediaQueryListEvent) => {
+        const newTheme = e.matches ? 'dark' : 'light';
+        root.setAttribute('data-theme', newTheme);
+        setResolvedTheme(newTheme);
+      };
+
+      mediaQuery.addEventListener('change', handler);
+      return () => mediaQuery.removeEventListener('change', handler);
+    } else {
+      root.setAttribute('data-theme', theme);
+      setResolvedTheme(theme);
+      localStorage.setItem('theme', theme);
+    }
+  }, [theme]);
+
+  return (
+    <ThemeContext.Provider value={{ theme, setTheme, resolvedTheme }}>
+      {children}
+    </ThemeContext.Provider>
+  );
+}
+
+export function useTheme() {
+  const context = useContext(ThemeContext);
+  if (!context) {
+    throw new Error('useTheme must be used within ThemeProvider');
+  }
+  return context;
+}
+```
+
+### Theme Toggle Component
+
+```tsx
+function ThemeToggle() {
+  const { theme, setTheme } = useTheme();
+
+  return (
+    <select
+      value={theme}
+      onChange={(e) => setTheme(e.target.value as 'light' | 'dark' | 'system')}
+    >
+      <option value="light">Light</option>
+      <option value="dark">Dark</option>
+      <option value="system">System</option>
+    </select>
+  );
+}
+```
+
+---
+
+## Dark Mode Implementation
+
+### Preventing Flash of Wrong Theme
+
+Add a blocking script in your HTML head:
+
+```html
+<!-- index.html -->
+<head>
+  <script>
+    (function() {
+      const theme = localStorage.getItem('theme');
+      if (theme === 'dark' ||
+          (!theme && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+        document.documentElement.setAttribute('data-theme', 'dark');
+      }
+    })();
+  </script>
+</head>
+```
+
+### Complete Dark Mode CSS Structure
+
+```css
+/* variables.css */
+:root {
+  /* Light theme (default) */
+  --color-bg-primary: #ffffff;
+  --color-bg-secondary: #f8f9fa;
+  --color-bg-tertiary: #e9ecef;
+
+  --color-text-primary: #212529;
+  --color-text-secondary: #6c757d;
+  --color-text-muted: #adb5bd;
+
+  --color-border: #dee2e6;
+  --color-divider: #e9ecef;
+
+  --color-accent: #0d6efd;
+  --color-accent-hover: #0b5ed7;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.1);
+  --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.1);
+}
+
+[data-theme='dark'] {
+  --color-bg-primary: #121212;
+  --color-bg-secondary: #1e1e1e;
+  --color-bg-tertiary: #2d2d2d;
+
+  --color-text-primary: #e9ecef;
+  --color-text-secondary: #adb5bd;
+  --color-text-muted: #6c757d;
+
+  --color-border: #3d3d3d;
+  --color-divider: #2d2d2d;
+
+  --color-accent: #6ea8fe;
+  --color-accent-hover: #8bb9fe;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.5);
+}
+```
+
+<Callout type="info" title="Color Contrast">
+Ensure sufficient contrast ratios in both themes. Dark mode isn't just inverting colors—it requires careful selection of values for readability.
+</Callout>
+
+---
+
+## Component-Scoped Variables
+
+Override global variables at the component level:
+
+```css
+/* Card.module.css */
+.card {
+  /* Local overrides */
+  --card-padding: var(--spacing-md);
+  --card-radius: var(--border-radius);
+  --card-bg: var(--color-bg-secondary);
+
+  padding: var(--card-padding);
+  border-radius: var(--card-radius);
+  background: var(--card-bg);
+}
+
+.cardCompact {
+  --card-padding: var(--spacing-sm);
+}
+
+.cardHighlighted {
+  --card-bg: var(--color-accent);
+}
+```
+
+### Nested Variable Scoping
+
+```css
+/* Dialog.module.css */
+.dialog {
+  --dialog-width: 500px;
+  --dialog-padding: var(--spacing-lg);
+
+  width: var(--dialog-width);
+  padding: var(--dialog-padding);
+}
+
+.dialogSmall {
+  --dialog-width: 300px;
+  --dialog-padding: var(--spacing-md);
+}
+
+.dialogLarge {
+  --dialog-width: 800px;
+  --dialog-padding: var(--spacing-xl);
+}
+```
+
+---
+
+## Runtime Changes
+
+### Updating Variables with JavaScript
+
+```tsx
+function updateCSSVariable(name: string, value: string) {
+  document.documentElement.style.setProperty(name, value);
+}
+
+function removeCSSVariable(name: string) {
+  document.documentElement.style.removeProperty(name);
+}
+
+// Usage in component
+function AccentColorPicker() {
+  const handleColorChange = (color: string) => {
+    updateCSSVariable('--color-accent', color);
+  };
+
+  return (
+    <input
+      type="color"
+      onChange={(e) => handleColorChange(e.target.value)}
+    />
+  );
+}
+```
+
+### Element-Level Variables
+
+```tsx
+function DynamicCard({
+  accentColor,
+  children
+}: {
+  accentColor?: string;
+  children: React.ReactNode;
+}) {
+  const style = accentColor
+    ? { '--card-accent': accentColor } as React.CSSProperties
+    : undefined;
+
+  return (
+    <div className={styles.card} style={style}>
+      {children}
+    </div>
+  );
+}
+```
+
+```css
+/* Card.module.css */
+.card {
+  border-left: 4px solid var(--card-accent, var(--color-accent));
+}
+```
+
+---
+
+## Fallback Values
+
+### Single Fallback
+
+```css
+.element {
+  /* Falls back to blue if --color-primary isn't defined */
+  color: var(--color-primary, blue);
+}
+```
+
+### Chained Fallbacks
+
+```css
+.element {
+  /* Try component var, then theme var, then hardcoded value */
+  color: var(--button-color, var(--color-primary, #0066cc));
+}
+```
+
+### Fallback for Calculations
+
+```css
+.element {
+  /* Fallback in calc() */
+  padding: calc(var(--spacing-base, 8px) * 2);
+}
+```
+
+<Callout type="warn" title="Invalid Fallbacks">
+CSS variables don't validate values. `var(--size, red)` for a `width` property won't fall back—it will use the invalid value and break.
+</Callout>
+
+---
+
+## TypeScript Type Safety
+
+### Typed Variable Names
+
+```typescript
+// styles/tokens.ts
+export const cssVariables = {
+  colors: {
+    primary: '--color-primary',
+    secondary: '--color-secondary',
+    background: '--color-bg-primary',
+    text: '--color-text-primary',
+  },
+  spacing: {
+    xs: '--spacing-xs',
+    sm: '--spacing-sm',
+    md: '--spacing-md',
+    lg: '--spacing-lg',
+  },
+} as const;
+
+type CSSVariableName =
+  | typeof cssVariables.colors[keyof typeof cssVariables.colors]
+  | typeof cssVariables.spacing[keyof typeof cssVariables.spacing];
+
+export function setCSSVariable(name: CSSVariableName, value: string) {
+  document.documentElement.style.setProperty(name, value);
+}
+```
+
+### Theme Type Definition
+
+```typescript
+// types/theme.ts
+interface ThemeTokens {
+  colors: {
+    bgPrimary: string;
+    bgSecondary: string;
+    textPrimary: string;
+    textSecondary: string;
+    accent: string;
+  };
+  spacing: {
+    xs: string;
+    sm: string;
+    md: string;
+    lg: string;
+  };
+  borderRadius: string;
+}
+
+const lightTheme: ThemeTokens = {
+  colors: {
+    bgPrimary: '#ffffff',
+    bgSecondary: '#f5f5f5',
+    textPrimary: '#1a1a1a',
+    textSecondary: '#666666',
+    accent: '#0066cc',
+  },
+  spacing: {
+    xs: '4px',
+    sm: '8px',
+    md: '16px',
+    lg: '24px',
+  },
+  borderRadius: '4px',
+};
+
+export function applyTheme(theme: ThemeTokens) {
+  const root = document.documentElement;
+  root.style.setProperty('--color-bg-primary', theme.colors.bgPrimary);
+  root.style.setProperty('--color-bg-secondary', theme.colors.bgSecondary);
+  root.style.setProperty('--color-text-primary', theme.colors.textPrimary);
+  root.style.setProperty('--color-text-secondary', theme.colors.textSecondary);
+  root.style.setProperty('--color-accent', theme.colors.accent);
+  // ... etc
+}
+```
+
+---
+
+## Design Token Organization
+
+### Semantic vs Primitive Tokens
+
+```css
+:root {
+  /* Primitive tokens (raw values) */
+  --blue-50: #eff6ff;
+  --blue-100: #dbeafe;
+  --blue-500: #3b82f6;
+  --blue-600: #2563eb;
+  --blue-900: #1e3a8a;
+
+  --gray-50: #f9fafb;
+  --gray-100: #f3f4f6;
+  --gray-500: #6b7280;
+  --gray-900: #111827;
+
+  /* Semantic tokens (contextual meaning) */
+  --color-primary: var(--blue-500);
+  --color-primary-hover: var(--blue-600);
+  --color-background: var(--gray-50);
+  --color-text: var(--gray-900);
+  --color-text-muted: var(--gray-500);
+}
+
+[data-theme='dark'] {
+  /* Only remap semantic tokens */
+  --color-primary: var(--blue-400);
+  --color-primary-hover: var(--blue-300);
+  --color-background: var(--gray-900);
+  --color-text: var(--gray-50);
+  --color-text-muted: var(--gray-400);
+}
+```
+
+<Callout type="info" title="Best Practice">
+Components should only use semantic tokens. This allows theme changes without touching component styles.
+</Callout>
+
+---
+
+## Comparison Table
+
+| Approach | Runtime Cost | Type Safety | Dynamic | SSR Friendly |
+|----------|--------------|-------------|---------|--------------|
+| CSS Variables | None | Manual | Yes | Yes |
+| Inline Styles | Low | Built-in | Yes | Yes |
+| CSS Modules | None | With tools | No | Yes |
+| data-attributes | None | Manual | Yes | Yes |

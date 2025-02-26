@@ -1,0 +1,568 @@
+---
+title: Performance Pitfalls
+description: Common React performance mistakes and how to avoid them
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## Inline Object/Array Props
+
+New reference on every render breaks memoization:
+
+### The Problem
+
+```tsx
+function Parent() {
+  const [count, setCount] = useState(0);
+
+  return (
+    <div>
+      <button onClick={() => setCount(c => c + 1)}>{count}</button>
+      <MemoizedChart
+        data={[1, 2, 3, 4, 5]}           // New array every render
+        config={{ color: 'blue' }}        // New object every render
+        style={{ padding: 20 }}           // New object every render
+      />
+    </div>
+  );
+}
+```
+
+Even though values are identical, references differ.
+
+### Solutions
+
+```tsx
+// Solution 1: Hoist static values outside component
+const DATA = [1, 2, 3, 4, 5];
+const CONFIG = { color: 'blue' };
+const STYLE = { padding: 20 };
+
+function Parent() {
+  const [count, setCount] = useState(0);
+
+  return (
+    <div>
+      <button onClick={() => setCount(c => c + 1)}>{count}</button>
+      <MemoizedChart data={DATA} config={CONFIG} style={STYLE} />
+    </div>
+  );
+}
+
+// Solution 2: useMemo for dynamic values
+function Parent() {
+  const [count, setCount] = useState(0);
+  const [color, setColor] = useState('blue');
+
+  const config = useMemo(() => ({ color }), [color]);
+
+  return <MemoizedChart config={config} />;
+}
+```
+
+| Approach | When to Use |
+|----------|-------------|
+| Hoist outside | Static values that never change |
+| useMemo | Values derived from props/state |
+| Inline (no change) | Non-memoized children |
+
+---
+
+## Anonymous Functions in JSX
+
+Inline functions create new references:
+
+### The Problem
+
+```tsx
+function TodoList({ items, onDelete }: Props) {
+  return (
+    <ul>
+      {items.map(item => (
+        <MemoizedTodoItem
+          key={item.id}
+          item={item}
+          onDelete={() => onDelete(item.id)}  // New function per item, per render
+        />
+      ))}
+    </ul>
+  );
+}
+```
+
+### Solutions
+
+```tsx
+// Solution 1: Pass ID, handle in child
+function TodoList({ items, onDelete }: Props) {
+  return (
+    <ul>
+      {items.map(item => (
+        <MemoizedTodoItem
+          key={item.id}
+          item={item}
+          onDelete={onDelete}  // Stable reference
+        />
+      ))}
+    </ul>
+  );
+}
+
+const MemoizedTodoItem = memo(function TodoItem({ item, onDelete }: Props) {
+  return (
+    <li>
+      {item.text}
+      <button onClick={() => onDelete(item.id)}>Delete</button>
+    </li>
+  );
+});
+
+// Solution 2: useCallback with stable handler
+function TodoList({ items, onDelete }: Props) {
+  const handleDelete = useCallback((id: string) => {
+    onDelete(id);
+  }, [onDelete]);
+
+  return (
+    <ul>
+      {items.map(item => (
+        <MemoizedTodoItem
+          key={item.id}
+          item={item}
+          onDelete={handleDelete}
+        />
+      ))}
+    </ul>
+  );
+}
+```
+
+<Callout type="info" title="When Inline Functions Are Fine">
+If the child is not memoized, inline functions cause no extra re-renders. Only stabilize when passing to memo'd components.
+</Callout>
+
+---
+
+## Index as Key
+
+Using array index as key causes incorrect behavior:
+
+### The Problems
+
+```tsx
+// Problem 1: Incorrect updates when items reorder
+function List({ items }: Props) {
+  return (
+    <ul>
+      {items.map((item, index) => (
+        <li key={index}>{item.name}</li>  // Key doesn't follow item
+      ))}
+    </ul>
+  );
+}
+
+// Problem 2: State loss when items are added/removed
+function EditableList({ items }: Props) {
+  return (
+    <ul>
+      {items.map((item, index) => (
+        <EditableItem key={index} initialValue={item.name} />
+      ))}
+    </ul>
+  );
+}
+// Adding item at start: all inputs lose their typed content
+```
+
+### When Index Keys Break
+
+| Operation | Result with Index Key |
+|-----------|----------------------|
+| Add at start | All components remount |
+| Remove from middle | Wrong items update |
+| Reorder | State attached to wrong items |
+| Filter | Unpredictable behavior |
+
+### Solutions
+
+```tsx
+// Use stable, unique identifiers
+{items.map(item => (
+  <li key={item.id}>{item.name}</li>
+))}
+
+// Generate IDs if items don't have them
+const itemsWithIds = items.map((item, i) => ({
+  ...item,
+  id: item.id ?? `generated-${i}-${item.name}`,
+}));
+```
+
+### When Index is Acceptable
+
+```tsx
+// Static list that never changes
+const MENU_ITEMS = ['Home', 'About', 'Contact'];
+
+function Nav() {
+  return (
+    <nav>
+      {MENU_ITEMS.map((item, index) => (
+        <a key={index} href={`/${item.toLowerCase()}`}>{item}</a>
+      ))}
+    </nav>
+  );
+}
+```
+
+---
+
+## Large Component Trees
+
+Deeply nested components cause cascading re-renders:
+
+### The Problem
+
+```tsx
+function App() {
+  const [theme, setTheme] = useState('light');
+
+  return (
+    <div className={theme}>
+      <Header>
+        <Navigation>
+          <NavItem>Home</NavItem>
+          <NavItem>About</NavItem>
+          <NavItem>
+            <Dropdown>
+              <DropdownItem>Settings</DropdownItem>
+              <DropdownItem>Profile</DropdownItem>
+            </Dropdown>
+          </NavItem>
+        </Navigation>
+      </Header>
+      {/* 50 more deeply nested components */}
+    </div>
+  );
+}
+// Theme change re-renders everything
+```
+
+### Solutions
+
+```tsx
+// Solution 1: Flatten structure where possible
+function App() {
+  return (
+    <ThemeProvider>
+      <Header />
+      <Navigation />
+      <MainContent />
+      <Footer />
+    </ThemeProvider>
+  );
+}
+
+// Solution 2: Strategic memoization at boundaries
+const MemoizedNavigation = memo(Navigation);
+const MemoizedMainContent = memo(MainContent);
+
+// Solution 3: Composition to isolate state
+function ThemeToggle({ children }: Props) {
+  const [theme, setTheme] = useState('light');
+
+  return (
+    <div className={theme}>
+      <button onClick={() => setTheme(t => t === 'light' ? 'dark' : 'light')}>
+        Toggle
+      </button>
+      {children}  {/* Stable reference */}
+    </div>
+  );
+}
+```
+
+---
+
+## Context Overuse
+
+Context causes all consumers to re-render on any value change:
+
+### The Problem
+
+```tsx
+interface AppState {
+  user: User;
+  theme: Theme;
+  notifications: Notification[];
+  cart: CartItem[];
+  preferences: Preferences;
+}
+
+const AppContext = createContext<AppState>(null!);
+
+function App() {
+  const [state, setState] = useState<AppState>(initialState);
+
+  return (
+    <AppContext.Provider value={state}>
+      <Header />      {/* Re-renders on cart update */}
+      <ProductList /> {/* Re-renders on notification */}
+      <Cart />        {/* Re-renders on theme change */}
+    </AppContext.Provider>
+  );
+}
+```
+
+Every state change re-renders all context consumers.
+
+### Solutions
+
+```tsx
+// Solution 1: Split contexts by update frequency
+const UserContext = createContext<User>(null!);
+const ThemeContext = createContext<Theme>(null!);
+const CartContext = createContext<Cart>(null!);
+
+function App() {
+  return (
+    <UserProvider>
+      <ThemeProvider>
+        <CartProvider>
+          <Content />
+        </CartProvider>
+      </ThemeProvider>
+    </UserProvider>
+  );
+}
+
+// Solution 2: Separate state and dispatch
+const CartStateContext = createContext<CartItem[]>([]);
+const CartDispatchContext = createContext<Dispatch<CartAction>>(null!);
+
+function CartProvider({ children }: Props) {
+  const [cart, dispatch] = useReducer(cartReducer, []);
+
+  return (
+    <CartStateContext.Provider value={cart}>
+      <CartDispatchContext.Provider value={dispatch}>
+        {children}
+      </CartDispatchContext.Provider>
+    </CartStateContext.Provider>
+  );
+}
+
+// Components that only dispatch don't re-render on state changes
+function AddToCartButton({ productId }: Props) {
+  const dispatch = useContext(CartDispatchContext);
+  return <button onClick={() => dispatch({ type: 'ADD', productId })}>Add</button>;
+}
+
+// Solution 3: Memoize context value
+function ThemeProvider({ children }: Props) {
+  const [theme, setTheme] = useState('light');
+
+  const value = useMemo(
+    () => ({ theme, setTheme }),
+    [theme]
+  );
+
+  return (
+    <ThemeContext.Provider value={value}>
+      {children}
+    </ThemeContext.Provider>
+  );
+}
+```
+
+| Pattern | Re-renders When |
+|---------|-----------------|
+| Single context | Any state changes |
+| Split contexts | Only relevant state changes |
+| State/dispatch split | State readers: state changes; Dispatchers: never |
+
+---
+
+## Missing Memo Dependencies
+
+Stale closures from incorrect dependency arrays:
+
+### The Problem
+
+```tsx
+function SearchResults({ query }: Props) {
+  const [results, setResults] = useState<Result[]>([]);
+
+  const handleSearch = useCallback(async () => {
+    const data = await search(query);  // Uses stale query!
+    setResults(data);
+  }, []);  // Missing 'query' dependency
+
+  useEffect(() => {
+    handleSearch();
+  }, [handleSearch]);
+
+  return <ResultList results={results} />;
+}
+```
+
+### The Fix
+
+```tsx
+function SearchResults({ query }: Props) {
+  const [results, setResults] = useState<Result[]>([]);
+
+  const handleSearch = useCallback(async () => {
+    const data = await search(query);
+    setResults(data);
+  }, [query]);  // Include all dependencies
+
+  useEffect(() => {
+    handleSearch();
+  }, [handleSearch]);
+
+  return <ResultList results={results} />;
+}
+```
+
+### Common Dependency Mistakes
+
+```tsx
+// Mistake 1: Empty array when deps exist
+const memoized = useMemo(() => process(data), []);  // Stale data
+
+// Mistake 2: Object in deps (changes every render)
+const memoized = useMemo(() => calculate(options), [options]);
+// options = { a: 1 } is new object each render
+
+// Mistake 3: Function in deps without useCallback
+useEffect(() => {
+  fetchData();
+}, [fetchData]);  // fetchData is new each render
+```
+
+<Callout type="warn" title="Use ESLint Plugin">
+Enable `eslint-plugin-react-hooks` with `exhaustive-deps` rule to catch missing dependencies.
+</Callout>
+
+---
+
+## Measuring Wrong Things
+
+Profiling mistakes that lead to incorrect conclusions:
+
+### Mistake 1: Development Mode Profiling
+
+```tsx
+// Development: Includes extra checks, warnings, double-rendering
+// Production: Optimized, no dev overhead
+
+// Always build for production before profiling
+npm run build
+npm run preview
+```
+
+### Mistake 2: Small Data Sets
+
+```tsx
+// Testing with 10 items shows no issues
+// Production has 10,000 items
+
+function List({ items }: Props) {
+  return items.map(item => <Item key={item.id} {...item} />);
+}
+
+// Profile with realistic data volumes
+```
+
+### Mistake 3: Ignoring Network
+
+```tsx
+// Fast local API calls mask real latency
+// Production API: 200-500ms latency
+
+// Test with throttled network:
+// DevTools → Network → Slow 3G
+```
+
+### Mistake 4: Optimizing Render Instead of Architecture
+
+```tsx
+// Bad: Adding memo to fix architecture problem
+const MemoizedChild = memo(function Child({ data }: Props) {
+  return <ExpensiveVisualization data={data} />;
+});
+
+function Parent() {
+  const [unrelated, setUnrelated] = useState(0);
+  const data = useData();  // Doesn't change often
+
+  return (
+    <div>
+      <button onClick={() => setUnrelated(u => u + 1)}>Click</button>
+      <MemoizedChild data={data} />  // Bandaid fix
+    </div>
+  );
+}
+
+// Better: Fix the architecture
+function Parent() {
+  return (
+    <div>
+      <Counter />  {/* State isolated */}
+      <DataVisualization />  {/* No unnecessary re-renders */}
+    </div>
+  );
+}
+```
+
+### Mistake 5: Micro-optimizations
+
+```tsx
+// Premature optimization
+const label = useMemo(() => `${firstName} ${lastName}`, [firstName, lastName]);
+
+// String concatenation: ~0.001ms
+// useMemo overhead: ~0.01ms
+// Net result: Slower!
+
+// Just compute it
+const label = `${firstName} ${lastName}`;
+```
+
+---
+
+## Performance Anti-Patterns Summary
+
+| Anti-Pattern | Impact | Fix |
+|--------------|--------|-----|
+| Inline objects | Breaks memo | Hoist or useMemo |
+| Inline functions | Breaks memo | useCallback or child handles |
+| Index keys | Wrong updates | Stable IDs |
+| Deep nesting | Cascade renders | Flatten, memoize boundaries |
+| Single context | All consumers render | Split contexts |
+| Missing deps | Stale data, bugs | Include all deps |
+| Dev mode profiling | False metrics | Profile production |
+
+---
+
+## Quick Reference: When to Worry
+
+### Investigate If
+
+- Interactions feel sluggish (> 100ms response)
+- Typing lag in inputs
+- Scroll jank
+- Animation stuttering
+- Profiler shows > 16ms renders
+
+### Probably Fine If
+
+- Profiler shows < 5ms renders
+- No perceptible lag
+- Updates are infrequent
+- Components are simple
+
+<Callout type="info" title="Golden Rule">
+User-perceptible lag is the only performance problem that matters. If users don't notice, don't optimize.
+</Callout>

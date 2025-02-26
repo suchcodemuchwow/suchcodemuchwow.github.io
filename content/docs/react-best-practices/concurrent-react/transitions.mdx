@@ -1,0 +1,462 @@
+---
+title: Transitions
+description: Managing urgent vs non-urgent updates in React
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## What Are Transitions?
+
+Transitions mark state updates as non-urgent, allowing React to:
+- Keep the UI responsive during expensive updates
+- Interrupt non-urgent work for urgent updates
+- Show the old UI while preparing the new one
+
+---
+
+## useTransition Hook
+
+Returns `isPending` state and `startTransition` function:
+
+```tsx
+import { useState, useTransition } from 'react';
+
+function TabContainer() {
+  const [tab, setTab] = useState('home');
+  const [isPending, startTransition] = useTransition();
+
+  function selectTab(nextTab: string) {
+    startTransition(() => {
+      setTab(nextTab); // Non-urgent update
+    });
+  }
+
+  return (
+    <div>
+      <TabButtons onSelect={selectTab} isPending={isPending} />
+      <div style={{ opacity: isPending ? 0.7 : 1 }}>
+        {tab === 'home' && <HomeTab />}
+        {tab === 'posts' && <PostsTab />}
+        {tab === 'contact' && <ContactTab />}
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+## startTransition Function
+
+Standalone function when you don't need `isPending`:
+
+```tsx
+import { startTransition } from 'react';
+
+function handleSearch(query: string) {
+  // Urgent: Update input immediately
+  setInputValue(query);
+
+  // Non-urgent: Filter results can wait
+  startTransition(() => {
+    setSearchResults(filterItems(query));
+  });
+}
+```
+
+<Callout type="info" title="When to Use Which">
+Use `useTransition` when you need the pending state for UI feedback. Use `startTransition` when you just want to mark an update as non-urgent.
+</Callout>
+
+---
+
+## Urgent vs Non-Urgent Updates
+
+React categorizes updates by priority:
+
+| Update Type | Priority | Examples |
+|-------------|----------|----------|
+| Urgent | High | Typing, clicking, pressing |
+| Transition | Low | Tab switching, filtering, navigation |
+
+```tsx
+function SearchPage() {
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<Item[]>([]);
+  const [isPending, startTransition] = useTransition();
+
+  function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const value = e.target.value;
+
+    // Urgent: Input must feel instant
+    setQuery(value);
+
+    // Non-urgent: Results can lag behind
+    startTransition(() => {
+      setResults(searchItems(value));
+    });
+  }
+
+  return (
+    <div>
+      <input value={query} onChange={handleChange} />
+      {isPending && <Spinner />}
+      <ResultsList items={results} />
+    </div>
+  );
+}
+```
+
+---
+
+## isPending State
+
+Indicates a transition is in progress:
+
+```tsx
+function Navigation() {
+  const [page, setPage] = useState('/');
+  const [isPending, startTransition] = useTransition();
+
+  function navigate(url: string) {
+    startTransition(() => {
+      setPage(url);
+    });
+  }
+
+  return (
+    <div>
+      <nav style={{ opacity: isPending ? 0.5 : 1 }}>
+        <button onClick={() => navigate('/')}>Home</button>
+        <button onClick={() => navigate('/about')}>About</button>
+      </nav>
+
+      {isPending && <LoadingBar />}
+
+      <PageContent url={page} />
+    </div>
+  );
+}
+```
+
+### Visual Feedback Patterns
+
+| Pattern | When to Use |
+|---------|-------------|
+| Opacity reduction | Indicate stale content |
+| Loading bar | Progress indication |
+| Spinner (small) | Discrete loading hint |
+| Disabled state | Prevent duplicate actions |
+
+---
+
+## Use Cases
+
+### Tab Switching
+
+```tsx
+function Tabs() {
+  const [activeTab, setActiveTab] = useState(0);
+  const [isPending, startTransition] = useTransition();
+
+  const tabs = [
+    { label: 'Overview', content: <Overview /> },
+    { label: 'Analytics', content: <HeavyAnalytics /> },
+    { label: 'Reports', content: <HeavyReports /> },
+  ];
+
+  return (
+    <div>
+      <div role="tablist">
+        {tabs.map((tab, index) => (
+          <button
+            key={index}
+            role="tab"
+            aria-selected={activeTab === index}
+            onClick={() => {
+              startTransition(() => setActiveTab(index));
+            }}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      <div style={{ opacity: isPending ? 0.6 : 1 }}>
+        {tabs[activeTab].content}
+      </div>
+    </div>
+  );
+}
+```
+
+### Search with Instant Input
+
+```tsx
+function SearchWithSuggestions() {
+  const [query, setQuery] = useState('');
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [isPending, startTransition] = useTransition();
+
+  function handleInput(value: string) {
+    setQuery(value); // Urgent
+
+    startTransition(() => {
+      // Expensive computation
+      const matches = allItems
+        .filter(item => item.toLowerCase().includes(value.toLowerCase()))
+        .slice(0, 10);
+      setSuggestions(matches);
+    });
+  }
+
+  return (
+    <div>
+      <input
+        value={query}
+        onChange={(e) => handleInput(e.target.value)}
+        placeholder="Search..."
+      />
+      <ul style={{ opacity: isPending ? 0.5 : 1 }}>
+        {suggestions.map(item => (
+          <li key={item}>{item}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+```
+
+### Client-Side Navigation
+
+```tsx
+function Router() {
+  const [currentPath, setCurrentPath] = useState(window.location.pathname);
+  const [isPending, startTransition] = useTransition();
+
+  useEffect(() => {
+    function handlePopState() {
+      startTransition(() => {
+        setCurrentPath(window.location.pathname);
+      });
+    }
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  function navigate(path: string) {
+    window.history.pushState(null, '', path);
+    startTransition(() => {
+      setCurrentPath(path);
+    });
+  }
+
+  return (
+    <div>
+      {isPending && <NavigationSpinner />}
+      <Routes currentPath={currentPath} navigate={navigate} />
+    </div>
+  );
+}
+```
+
+---
+
+## Transitions vs Debounce
+
+| Aspect | Transitions | Debounce |
+|--------|-------------|----------|
+| Delay | React decides | You specify fixed delay |
+| Interruptible | Yes | No (timer-based) |
+| Concurrent rendering | Yes | No |
+| Input responsiveness | Always instant | Always instant |
+| Result timing | ASAP when idle | After delay expires |
+
+### Debounce
+
+```tsx
+function DebouncedSearch() {
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<Item[]>([]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setResults(searchItems(query));
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [query]);
+
+  return (
+    <div>
+      <input value={query} onChange={(e) => setQuery(e.target.value)} />
+      <ResultsList items={results} />
+    </div>
+  );
+}
+```
+
+### Transition
+
+```tsx
+function TransitionSearch() {
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<Item[]>([]);
+  const [isPending, startTransition] = useTransition();
+
+  function handleChange(value: string) {
+    setQuery(value);
+    startTransition(() => {
+      setResults(searchItems(value));
+    });
+  }
+
+  return (
+    <div>
+      <input value={query} onChange={(e) => handleChange(e.target.value)} />
+      {isPending && <Spinner />}
+      <ResultsList items={results} />
+    </div>
+  );
+}
+```
+
+<Callout type="info" title="When to Choose">
+Use **transitions** for CPU-bound work (filtering, sorting). Use **debounce** for network requests where you want to limit API calls.
+</Callout>
+
+---
+
+## When Transitions Don't Help
+
+### Network-Bound Operations
+
+```tsx
+// Transition won't help here - the delay is network, not CPU
+startTransition(() => {
+  fetch('/api/data').then(setData);
+});
+
+// Better: Use Suspense for data fetching
+// Or: Debounce to limit API calls
+```
+
+### Already Fast Operations
+
+```tsx
+// No benefit - operation is instant
+startTransition(() => {
+  setCount(count + 1);
+});
+
+// Just update directly
+setCount(count + 1);
+```
+
+### When You Need Immediate Results
+
+```tsx
+// Don't use transitions for form validation feedback
+// Users expect instant validation
+
+function Form() {
+  const [email, setEmail] = useState('');
+  const [error, setError] = useState('');
+
+  function handleChange(value: string) {
+    setEmail(value);
+    // Don't wrap in transition - users need immediate feedback
+    setError(validateEmail(value) ? '' : 'Invalid email');
+  }
+}
+```
+
+---
+
+## Transitions with Suspense
+
+Transitions prevent Suspense fallback from showing during navigation:
+
+```tsx
+function App() {
+  const [page, setPage] = useState<'home' | 'profile'>('home');
+  const [isPending, startTransition] = useTransition();
+
+  function navigate(nextPage: 'home' | 'profile') {
+    startTransition(() => {
+      setPage(nextPage);
+    });
+  }
+
+  return (
+    <div>
+      <nav>
+        <button onClick={() => navigate('home')}>Home</button>
+        <button onClick={() => navigate('profile')}>Profile</button>
+      </nav>
+
+      {/* Without transition: Shows fallback on every navigation */}
+      {/* With transition: Keeps old content, shows isPending state */}
+      <Suspense fallback={<PageSkeleton />}>
+        {page === 'home' ? <Home /> : <Profile />}
+      </Suspense>
+    </div>
+  );
+}
+```
+
+<Callout type="warn" title="Key Behavior">
+When navigating with a transition, React keeps showing the old UI instead of the Suspense fallback. Use `isPending` to indicate loading.
+</Callout>
+
+---
+
+## Common Mistakes
+
+### 1. Wrapping Urgent Updates
+
+```tsx
+// Wrong: Input feels laggy
+startTransition(() => {
+  setInputValue(e.target.value); // Should be urgent!
+});
+
+// Correct: Only wrap the expensive part
+setInputValue(e.target.value);
+startTransition(() => {
+  setFilteredResults(filter(e.target.value));
+});
+```
+
+### 2. Expecting Network Speedup
+
+```tsx
+// Transitions don't make fetches faster
+startTransition(() => {
+  fetchData(); // Still takes same time
+});
+```
+
+### 3. Missing isPending Feedback
+
+```tsx
+// Bad: No indication something is happening
+startTransition(() => {
+  setTab(newTab);
+});
+
+// Good: Show the user something is loading
+const [isPending, startTransition] = useTransition();
+// ... use isPending for visual feedback
+```
+
+---
+
+## Best Practices
+
+1. **Separate urgent from non-urgent** — Only wrap the expensive update
+2. **Always show isPending feedback** — Users need to know something is happening
+3. **Use for CPU-bound work** — Not network requests
+4. **Combine with Suspense** — For smooth navigation experiences
+5. **Don't overuse** — Only where you have actual performance issues

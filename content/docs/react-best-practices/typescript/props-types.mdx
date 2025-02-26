@@ -1,0 +1,360 @@
+---
+title: Props Typing Patterns
+description: Comprehensive patterns for typing React component props including optional props, default values, and complex prop structures.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## Overview
+
+Properly typed props are the foundation of type-safe React components. This guide covers patterns from basic to advanced prop typing scenarios.
+
+## Basic Props Typing
+
+### Interface Definition
+
+```tsx
+interface UserCardProps {
+  name: string;
+  email: string;
+  avatarUrl: string;
+}
+
+function UserCard({ name, email, avatarUrl }: UserCardProps) {
+  return (
+    <div className="user-card">
+      <img src={avatarUrl} alt={name} />
+      <h3>{name}</h3>
+      <p>{email}</p>
+    </div>
+  );
+}
+```
+
+### Inline Props Type
+
+For simple components with few props:
+
+```tsx
+function Greeting({ name }: { name: string }) {
+  return <p>Hello, {name}!</p>;
+}
+```
+
+## Optional Props
+
+### Basic Optional Props
+
+```tsx
+interface ButtonProps {
+  label: string;
+  variant?: 'primary' | 'secondary' | 'danger';
+  disabled?: boolean;
+}
+
+function Button({ label, variant = 'primary', disabled = false }: ButtonProps) {
+  return (
+    <button className={`btn btn-${variant}`} disabled={disabled}>
+      {label}
+    </button>
+  );
+}
+```
+
+### Optional vs Required Decision
+
+| Prop Situation | Use Required | Use Optional |
+|----------------|--------------|--------------|
+| Core functionality | Yes | No |
+| Visual customization | No | Yes |
+| Behavior modifiers | No | Yes |
+| Data display | Yes | No |
+| Event handlers (essential) | Yes | No |
+| Event handlers (auxiliary) | No | Yes |
+
+## Default Values
+
+### Destructuring Defaults
+
+```tsx
+interface PaginationProps {
+  currentPage: number;
+  totalPages: number;
+  pageSize?: number;
+  onPageChange: (page: number) => void;
+}
+
+function Pagination({
+  currentPage,
+  totalPages,
+  pageSize = 10,
+  onPageChange,
+}: PaginationProps) {
+  // pageSize is guaranteed to be a number here
+  return (
+    <nav>
+      {/* pagination implementation */}
+    </nav>
+  );
+}
+```
+
+<Callout type="info">
+Destructuring defaults are applied at runtime, so TypeScript still sees the prop as optional in the type. Use `Required<T>` if you need the type to reflect the default.
+</Callout>
+
+### defaultProps (Legacy)
+
+```tsx
+interface LegacyCardProps {
+  title: string;
+  bordered?: boolean;
+}
+
+function LegacyCard({ title, bordered }: LegacyCardProps) {
+  return (
+    <div className={bordered ? 'bordered' : ''}>
+      <h2>{title}</h2>
+    </div>
+  );
+}
+
+LegacyCard.defaultProps = {
+  bordered: true,
+};
+```
+
+<Callout type="warn">
+`defaultProps` is deprecated for function components. Use destructuring defaults instead.
+</Callout>
+
+## Children Props
+
+### React.ReactNode
+
+The most flexible type for children:
+
+```tsx
+interface ContainerProps {
+  children: React.ReactNode;
+}
+
+function Container({ children }: ContainerProps) {
+  return <div className="container">{children}</div>;
+}
+```
+
+### Specific Children Types
+
+```tsx
+// Only string children
+interface LabelProps {
+  children: string;
+}
+
+// Single element child
+interface WrapperProps {
+  children: React.ReactElement;
+}
+
+// Function as children (render prop)
+interface DataFetcherProps<T> {
+  children: (data: T) => React.ReactNode;
+}
+```
+
+### Children Type Comparison
+
+| Type | Accepts | Use Case |
+|------|---------|----------|
+| `React.ReactNode` | Anything renderable | General containers |
+| `React.ReactElement` | JSX elements only | Single child wrappers |
+| `string` | Strings only | Text-only components |
+| `(data: T) => ReactNode` | Functions | Render props |
+| `React.ReactNode[]` | Arrays | List containers |
+
+## Complex Prop Patterns
+
+### Union Types for Variants
+
+```tsx
+interface BaseButtonProps {
+  size?: 'sm' | 'md' | 'lg';
+  disabled?: boolean;
+}
+
+interface LinkButtonProps extends BaseButtonProps {
+  href: string;
+  target?: '_blank' | '_self';
+}
+
+interface ActionButtonProps extends BaseButtonProps {
+  onClick: () => void;
+  type?: 'button' | 'submit' | 'reset';
+}
+
+type ButtonProps = LinkButtonProps | ActionButtonProps;
+
+function Button(props: ButtonProps) {
+  if ('href' in props) {
+    return <a href={props.href} target={props.target}>{/* ... */}</a>;
+  }
+  return <button onClick={props.onClick} type={props.type}>{/* ... */}</button>;
+}
+```
+
+### Conditional Props
+
+```tsx
+type ModalProps = {
+  title: string;
+  children: React.ReactNode;
+} & (
+  | { closable: true; onClose: () => void }
+  | { closable?: false; onClose?: never }
+);
+
+function Modal(props: ModalProps) {
+  return (
+    <div className="modal">
+      <header>
+        <h2>{props.title}</h2>
+        {props.closable && (
+          <button onClick={props.onClose}>Close</button>
+        )}
+      </header>
+      {props.children}
+    </div>
+  );
+}
+```
+
+## Extending HTML Element Props
+
+### Basic Extension
+
+```tsx
+interface CustomInputProps extends React.InputHTMLAttributes<HTMLInputElement> {
+  label: string;
+  error?: string;
+}
+
+function CustomInput({ label, error, ...inputProps }: CustomInputProps) {
+  return (
+    <div className="form-field">
+      <label>{label}</label>
+      <input {...inputProps} />
+      {error && <span className="error">{error}</span>}
+    </div>
+  );
+}
+```
+
+### Omitting Conflicting Props
+
+```tsx
+interface CustomSelectProps
+  extends Omit<React.SelectHTMLAttributes<HTMLSelectElement>, 'onChange'> {
+  options: Array<{ value: string; label: string }>;
+  onChange: (value: string) => void;
+}
+
+function CustomSelect({ options, onChange, ...selectProps }: CustomSelectProps) {
+  return (
+    <select
+      {...selectProps}
+      onChange={(e) => onChange(e.target.value)}
+    >
+      {options.map((opt) => (
+        <option key={opt.value} value={opt.value}>
+          {opt.label}
+        </option>
+      ))}
+    </select>
+  );
+}
+```
+
+## Pros and Cons
+
+### Interface for Props
+
+| Pros | Cons |
+|------|------|
+| Extendable with `extends` | Cannot use union types directly |
+| Clear declaration merging | Slightly more verbose |
+| Better error messages | - |
+| IDE autocomplete friendly | - |
+
+### Type Alias for Props
+
+| Pros | Cons |
+|------|------|
+| Supports unions natively | Cannot be extended |
+| Inline computed types | No declaration merging |
+| Intersection types easy | - |
+
+## When to Use
+
+| Pattern | Use When |
+|---------|----------|
+| Interface | Standard component props, extendable APIs |
+| Type alias | Union types needed, computed props |
+| Inline type | Simple, 1-2 prop components |
+| Extended HTML props | Wrapping native elements |
+| Conditional props | Props depend on other prop values |
+
+## When NOT to Use
+
+| Pattern | Avoid When |
+|---------|------------|
+| Inline types | More than 2-3 props |
+| `any` in props | Always avoid |
+| Overly complex unions | Simple boolean flag suffices |
+| Extended HTML props | Not wrapping native elements |
+
+## Readonly Props
+
+```tsx
+interface ImmutableListProps {
+  readonly items: readonly string[];
+  readonly onSelect: (item: string) => void;
+}
+
+function ImmutableList({ items, onSelect }: ImmutableListProps) {
+  // items.push('new') would error
+  return (
+    <ul>
+      {items.map((item) => (
+        <li key={item} onClick={() => onSelect(item)}>
+          {item}
+        </li>
+      ))}
+    </ul>
+  );
+}
+```
+
+<Callout type="info">
+While `readonly` doesn't prevent runtime mutations, it provides compile-time safety and documents intent.
+</Callout>
+
+## Best Practices
+
+1. **Export prop interfaces** for reusable components
+2. **Use semantic names** that describe the prop's purpose
+3. **Group related props** in nested objects when appropriate
+4. **Document complex props** with JSDoc comments
+5. **Prefer specific types** over `string` or `number` when possible
+6. **Use `readonly`** for props that shouldn't be mutated
+
+```tsx
+interface DataGridProps {
+  /** Data rows to display */
+  data: readonly Record<string, unknown>[];
+  /** Column configuration */
+  columns: readonly ColumnDef[];
+  /** Called when row selection changes */
+  onSelectionChange?: (selectedIds: string[]) => void;
+}
+```

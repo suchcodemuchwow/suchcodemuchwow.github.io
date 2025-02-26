@@ -1,0 +1,51 @@
+---
+title: Core Principles
+description: Core Principles For Modern React
+---
+
+### 1. Composition Over Inheritance
+
+React favors composition. Build complex UIs from simple, reusable pieces:
+
+```tsx
+// Instead of inheritance
+function Card({ children, header, footer }) {
+  return (
+    <div className="card">
+      {header && <div className="card-header">{header}</div>}
+      <div className="card-body">{children}</div>
+      {footer && <div className="card-footer">{footer}</div>}
+    </div>
+  );
+}
+```
+
+### 2. Single Responsibility
+
+Each component should do one thing well:
+
+```tsx
+// Bad: Component does too much
+function UserDashboard() {
+  // fetches data, formats dates, handles auth, renders UI...
+}
+
+// Good: Separate concerns
+function UserDashboard() {
+  const user = useUser();
+  return <DashboardLayout user={user} />;
+}
+```
+
+### 3. Colocation
+
+Keep related code together:
+
+| What | Where |
+|------|-------|
+| Component styles | Same file or `Component.module.css` |
+| Component tests | `Component.test.tsx` |
+| Component types | Same file or `Component.types.ts` |
+| Hooks used by one component | Same file |
+
+---

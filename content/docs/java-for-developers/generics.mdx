@@ -1,0 +1,215 @@
+---
+title: Generics
+description: Type-safe generic programming in Java
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## Basic Generics
+
+Generic classes and methods provide type safety without code duplication:
+
+```java
+public class Box<T> {
+    private T value;
+
+    public void set(T value) { this.value = value; }
+    public T get() { return value; }
+}
+
+Box<String> stringBox = new Box<>();
+stringBox.set("hello");
+String s = stringBox.get();  // no cast needed
+```
+
+---
+
+## Generic Methods
+
+```java
+public static <T> List<T> listOf(T... elements) {
+    return new ArrayList<>(Arrays.asList(elements));
+}
+
+// Type inferred from arguments
+List<String> strings = listOf("a", "b", "c");
+List<Integer> numbers = listOf(1, 2, 3);
+```
+
+---
+
+## Bounded Type Parameters
+
+### Upper Bounds
+
+```java
+// T must be Number or a subclass
+public static <T extends Number> double sum(List<T> numbers) {
+    return numbers.stream()
+        .mapToDouble(Number::doubleValue)
+        .sum();
+}
+
+sum(List.of(1, 2, 3));       // Integer extends Number
+sum(List.of(1.5, 2.5));      // Double extends Number
+sum(List.of("a", "b"));      // Compile error: String doesn't extend Number
+```
+
+### Multiple Bounds
+
+```java
+// T must extend Comparable AND implement Serializable
+public static <T extends Comparable<T> & Serializable> T max(T a, T b) {
+    return a.compareTo(b) > 0 ? a : b;
+}
+```
+
+---
+
+## Wildcards
+
+### Unbounded Wildcard
+
+```java
+public void printAll(List<?> items) {
+    for (Object item : items) {
+        System.out.println(item);
+    }
+}
+```
+
+### Upper Bounded (`? extends`)
+
+Read-only access to elements:
+
+```java
+public double sumNumbers(List<? extends Number> numbers) {
+    double sum = 0;
+    for (Number n : numbers) {
+        sum += n.doubleValue();
+    }
+    return sum;
+}
+
+sumNumbers(List.of(1, 2, 3));        // List<Integer>
+sumNumbers(List.of(1.5, 2.5));       // List<Double>
+```
+
+### Lower Bounded (`? super`)
+
+Write access to elements:
+
+```java
+public void addIntegers(List<? super Integer> list) {
+    list.add(1);
+    list.add(2);
+}
+
+addIntegers(new ArrayList<Integer>());
+addIntegers(new ArrayList<Number>());
+addIntegers(new ArrayList<Object>());
+```
+
+<Callout type="info" title="PECS Principle">
+**Producer Extends, Consumer Super**: Use `extends` when reading (producing) values, `super` when writing (consuming) values.
+</Callout>
+
+---
+
+## Type Erasure
+
+<Callout type="warn" title="Critical Concept">
+Java generics are erased at runtime. The JVM sees raw types only.
+</Callout>
+
+```java
+List<String> strings = new ArrayList<>();
+List<Integer> integers = new ArrayList<>();
+
+// At runtime, both are just ArrayList
+strings.getClass() == integers.getClass();  // true!
+
+// Can't do this:
+if (obj instanceof List<String>) { }  // compile error
+new T();                               // compile error
+new T[10];                             // compile error
+```
+
+<Callout type="info" title="JS/TS delta">
+TypeScript generics are also erased, so this is familiar. But Java's erasure has been around since Java 5 and has more edge cases around reflection and arrays.
+</Callout>
+
+### Working Around Erasure
+
+Use class tokens for runtime type information:
+
+```java
+public class TypedContainer<T> {
+    private final Class<T> type;
+
+    public TypedContainer(Class<T> type) {
+        this.type = type;
+    }
+
+    public T[] createArray(int size) {
+        return (T[]) Array.newInstance(type, size);
+    }
+}
+
+var container = new TypedContainer<>(String.class);
+String[] array = container.createArray(10);
+```
+
+---
+
+## Generic Interfaces
+
+```java
+public interface Repository<T, ID> {
+    Optional<T> findById(ID id);
+    List<T> findAll();
+    T save(T entity);
+    void deleteById(ID id);
+}
+
+public class UserRepository implements Repository<User, String> {
+    @Override
+    public Optional<User> findById(String id) { /* ... */ }
+    // ...
+}
+```
+
+---
+
+## Common Pitfalls
+
+### Raw Types
+
+```java
+// Don't use raw types
+List list = new ArrayList();  // raw type, loses type safety
+list.add("string");
+list.add(123);  // no compile error, but type unsafe
+
+// Always specify type parameter
+List<String> list = new ArrayList<>();
+```
+
+### Generic Array Creation
+
+```java
+// This doesn't work
+T[] array = new T[10];  // compile error
+
+// Workaround with unchecked cast
+@SuppressWarnings("unchecked")
+T[] array = (T[]) new Object[10];
+```
+
+### Overloading with Generics
+
+```java
+// These have the same erasure - won't compile
+public void process(List<String> strings) { }
+public void process(List<Integer> integers) { }  // error: same erasure
+```

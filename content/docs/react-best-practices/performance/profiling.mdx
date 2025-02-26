@@ -1,0 +1,445 @@
+---
+title: Profiling
+description: Measuring React performance with DevTools and manual techniques
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## React DevTools Profiler
+
+The primary tool for React performance analysis.
+
+### Setup
+
+1. Install React DevTools browser extension
+2. Open DevTools (F12)
+3. Navigate to "Profiler" tab
+4. Enable "Record why each component rendered" in settings
+
+### Recording a Session
+
+```tsx
+// Example app to profile
+function App() {
+  const [count, setCount] = useState(0);
+  const [text, setText] = useState('');
+
+  return (
+    <div>
+      <button onClick={() => setCount(c => c + 1)}>Count: {count}</button>
+      <input value={text} onChange={e => setText(e.target.value)} />
+      <ExpensiveList count={count} />
+    </div>
+  );
+}
+```
+
+1. Click the blue "Record" circle
+2. Interact with your app (click button, type in input)
+3. Click "Stop" to end recording
+4. Analyze the results
+
+---
+
+## Identifying Slow Renders
+
+### Render Duration Colors
+
+| Color | Duration | Action |
+|-------|----------|--------|
+| Gray | < 1ms | No action needed |
+| Green | 1-10ms | Usually fine |
+| Yellow | 10-50ms | Investigate |
+| Red | > 50ms | Optimize |
+
+### What to Look For
+
+1. **Components rendering when they shouldn't**
+   - Input changes triggering unrelated component renders
+   - Parent state causing unnecessary child renders
+
+2. **Long render times**
+   - Individual renders > 16ms (60fps threshold)
+   - Total commit time > 100ms
+
+3. **High render frequency**
+   - Same component rendering repeatedly
+   - Renders on every keystroke or mouse move
+
+---
+
+## Flamegraph Reading
+
+The flamegraph shows the component tree and render times:
+
+```
+┌─────────────────────────────────────────────────┐
+│ App (2.3ms)                                      │
+├─────────────────────────────────────────────────┤
+│ Header (0.2ms) │ Main (1.8ms)      │ Footer     │
+├────────────────┼───────────────────┤ (0.1ms)    │
+│                │ Sidebar │ Content │            │
+│                │ (0.3ms) │ (1.2ms) │            │
+│                │         ├─────────┤            │
+│                │         │ List    │            │
+│                │         │ (0.9ms) │            │
+└────────────────┴─────────┴─────────┴────────────┘
+```
+
+### Interpreting the Graph
+
+- **Width**: Relative render time
+- **Depth**: Component hierarchy
+- **Color**: Render time severity
+
+### Identifying Bottlenecks
+
+```tsx
+// Flamegraph shows:
+// ProductList (45ms)
+//   └── ProductCard x 100 (0.4ms each)
+//       └── PriceCalculator (0.3ms each)
+
+// The issue: 100 ProductCards re-rendering
+// Solution: Memoize ProductCard
+```
+
+---
+
+## Commit Information
+
+Each "commit" is when React updates the DOM.
+
+### Commit Panel Data
+
+| Metric | Meaning |
+|--------|---------|
+| Commit time | When the commit occurred |
+| Render duration | Time to render components |
+| Commit duration | Time for all lifecycle effects |
+| Interactions | What triggered the commit |
+
+### Analyzing Commits
+
+```tsx
+// Multiple commits for single interaction = problem
+// Example: Typing in input
+
+// Commit 1: Input state update (expected)
+// Commit 2: Derived state update (expected)
+// Commit 3: Effect-triggered update (investigate)
+// Commit 4: Another effect (problem!)
+```
+
+Look for cascading updates that should be batched.
+
+---
+
+## Why Did You Render (Manual)
+
+Build your own render tracking without external libraries:
+
+### Basic Render Logger
+
+```tsx
+function useRenderLog(componentName: string) {
+  const renderCount = useRef(0);
+  const prevProps = useRef<Record<string, unknown>>({});
+
+  useEffect(() => {
+    renderCount.current += 1;
+    console.log(`${componentName} rendered ${renderCount.current} times`);
+  });
+}
+
+function MyComponent(props: Props) {
+  useRenderLog('MyComponent');
+  // ...
+}
+```
+
+### Props Change Detector
+
+```tsx
+function useWhyDidYouRender<T extends Record<string, unknown>>(
+  componentName: string,
+  props: T
+) {
+  const prevProps = useRef<T>(props);
+
+  useEffect(() => {
+    const changedProps: string[] = [];
+
+    for (const key in props) {
+      if (prevProps.current[key] !== props[key]) {
+        changedProps.push(key);
+      }
+    }
+
+    if (changedProps.length > 0) {
+      console.log(`${componentName} re-rendered due to:`, changedProps);
+      changedProps.forEach(key => {
+        console.log(`  ${key}:`, {
+          from: prevProps.current[key],
+          to: props[key],
+        });
+      });
+    }
+
+    prevProps.current = props;
+  });
+}
+
+// Usage
+function ExpensiveComponent(props: Props) {
+  useWhyDidYouRender('ExpensiveComponent', props);
+  // ...
+}
+```
+
+### Render Time Tracker
+
+```tsx
+function useRenderTime(componentName: string) {
+  const startTime = performance.now();
+
+  useEffect(() => {
+    const endTime = performance.now();
+    const duration = endTime - startTime;
+
+    if (duration > 16) {
+      console.warn(`${componentName} slow render: ${duration.toFixed(2)}ms`);
+    }
+  });
+}
+```
+
+<Callout type="warn" title="Development Only">
+Remove these hooks in production. They add overhead and log noise.
+</Callout>
+
+---
+
+## Performance Marks
+
+Use the Performance API for precise measurements:
+
+### Basic Marks
+
+```tsx
+function ExpensiveOperation({ data }: Props) {
+  performance.mark('expensive-start');
+
+  const result = processData(data);
+
+  performance.mark('expensive-end');
+  performance.measure('expensive-operation', 'expensive-start', 'expensive-end');
+
+  return <div>{result}</div>;
+}
+```
+
+### Viewing in DevTools
+
+1. Open DevTools Performance tab
+2. Record a session
+3. Look for "User Timing" section
+4. Your marks appear as labeled segments
+
+### Component Lifecycle Marks
+
+```tsx
+function TrackedComponent({ id }: Props) {
+  const markPrefix = `component-${id}`;
+
+  // Mark render start
+  performance.mark(`${markPrefix}-render-start`);
+
+  useLayoutEffect(() => {
+    // Mark DOM update
+    performance.mark(`${markPrefix}-layout-effect`);
+    performance.measure(
+      `${markPrefix}-render-to-layout`,
+      `${markPrefix}-render-start`,
+      `${markPrefix}-layout-effect`
+    );
+  });
+
+  useEffect(() => {
+    // Mark effects complete
+    performance.mark(`${markPrefix}-effect`);
+    performance.measure(
+      `${markPrefix}-layout-to-effect`,
+      `${markPrefix}-layout-effect`,
+      `${markPrefix}-effect`
+    );
+
+    return () => {
+      // Clean up marks
+      performance.clearMarks(`${markPrefix}-render-start`);
+      performance.clearMarks(`${markPrefix}-layout-effect`);
+      performance.clearMarks(`${markPrefix}-effect`);
+    };
+  });
+
+  return <div>Component {id}</div>;
+}
+```
+
+### Aggregating Measurements
+
+```tsx
+function getPerformanceStats(measureName: string) {
+  const entries = performance.getEntriesByName(measureName);
+
+  if (entries.length === 0) return null;
+
+  const durations = entries.map(e => e.duration);
+
+  return {
+    count: entries.length,
+    total: durations.reduce((a, b) => a + b, 0),
+    average: durations.reduce((a, b) => a + b, 0) / entries.length,
+    min: Math.min(...durations),
+    max: Math.max(...durations),
+  };
+}
+
+// Usage
+console.table(getPerformanceStats('expensive-operation'));
+```
+
+---
+
+## Profiling Hooks
+
+### Custom Profiler Component
+
+```tsx
+import { Profiler, ProfilerOnRenderCallback } from 'react';
+
+const onRender: ProfilerOnRenderCallback = (
+  id,
+  phase,
+  actualDuration,
+  baseDuration,
+  startTime,
+  commitTime
+) => {
+  console.table({
+    id,
+    phase,
+    actualDuration: `${actualDuration.toFixed(2)}ms`,
+    baseDuration: `${baseDuration.toFixed(2)}ms`,
+    startTime,
+    commitTime,
+  });
+};
+
+function App() {
+  return (
+    <Profiler id="App" onRender={onRender}>
+      <MainContent />
+    </Profiler>
+  );
+}
+```
+
+### Profiler Metrics Explained
+
+| Metric | Description |
+|--------|-------------|
+| `id` | Profiler tree identifier |
+| `phase` | "mount" or "update" |
+| `actualDuration` | Time spent rendering this update |
+| `baseDuration` | Estimated time without memoization |
+| `startTime` | When React started rendering |
+| `commitTime` | When React committed the update |
+
+### Nested Profilers
+
+```tsx
+function App() {
+  return (
+    <Profiler id="App" onRender={onRender}>
+      <Header />
+      <Profiler id="MainContent" onRender={onRender}>
+        <Sidebar />
+        <Profiler id="Feed" onRender={onRender}>
+          <PostList />
+        </Profiler>
+      </Profiler>
+    </Profiler>
+  );
+}
+```
+
+---
+
+## Profiling Checklist
+
+### Before Optimizing
+
+1. Record baseline performance
+2. Note specific interactions that feel slow
+3. Identify render counts for key components
+4. Document actual vs perceived performance
+
+### During Investigation
+
+| Check | Tool |
+|-------|------|
+| Which components re-render? | DevTools Profiler |
+| Why do they re-render? | Manual WDYR hook |
+| How long do renders take? | Profiler + marks |
+| What triggers updates? | Commit panel |
+
+### After Optimizing
+
+1. Record new measurements
+2. Compare before/after metrics
+3. Verify no regressions elsewhere
+4. Test on low-end devices
+
+---
+
+## Common Profiling Mistakes
+
+### 1. Profiling in Development Mode
+
+```tsx
+// Development: Extra checks, slower
+// Production: Optimized, faster
+
+// Always profile production builds
+npm run build && npm run preview
+```
+
+### 2. Profiling with DevTools Open
+
+DevTools can slow down your app. Profile with DevTools closed when measuring real performance.
+
+### 3. Ignoring Real-World Conditions
+
+```tsx
+// Test with:
+// - CPU throttling (6x slowdown)
+// - Network throttling (slow 3G)
+// - Low memory conditions
+// - Real data volumes (not 10 items, 10,000 items)
+```
+
+### 4. Optimizing the Wrong Thing
+
+```tsx
+// Profile shows:
+// - Component A: 5ms render, renders 100x
+// - Component B: 50ms render, renders 1x
+
+// Total: A = 500ms, B = 50ms
+// Optimize A first despite lower individual time
+```
+
+<Callout type="info" title="Profile First, Always">
+Never optimize based on intuition. Measure, identify the actual bottleneck, then optimize.
+</Callout>

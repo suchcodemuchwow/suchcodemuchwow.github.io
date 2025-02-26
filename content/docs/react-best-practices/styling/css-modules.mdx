@@ -1,0 +1,395 @@
+---
+title: CSS Modules
+description: Scoped CSS styling with automatic class name hashing in React
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## What are CSS Modules?
+
+CSS Modules are CSS files where class names are scoped locally by default. The build tool generates unique class names, preventing style conflicts across components.
+
+```css
+/* Button.module.css */
+.button {
+  padding: 8px 16px;
+  border-radius: 4px;
+}
+
+.primary {
+  background: blue;
+  color: white;
+}
+```
+
+```tsx
+import styles from './Button.module.css';
+
+function Button({ children, variant = 'primary' }) {
+  return (
+    <button className={`${styles.button} ${styles[variant]}`}>
+      {children}
+    </button>
+  );
+}
+```
+
+---
+
+## Setup with Vite
+
+Vite supports CSS Modules out of the box. No configuration needed for `.module.css` files.
+
+```typescript
+// vite.config.ts
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+
+export default defineConfig({
+  plugins: [react()],
+  css: {
+    modules: {
+      // Generate readable class names in development
+      generateScopedName: '[name]__[local]___[hash:base64:5]',
+    },
+  },
+});
+```
+
+### Production vs Development Names
+
+| Environment | Class Name Example |
+|-------------|-------------------|
+| Development | `Button__primary___x7yz2` |
+| Production | `x7yz2` |
+
+---
+
+## Basic Usage
+
+### Single Class
+
+```tsx
+import styles from './Card.module.css';
+
+function Card({ children }: { children: React.ReactNode }) {
+  return <div className={styles.card}>{children}</div>;
+}
+```
+
+### Multiple Classes
+
+```tsx
+import styles from './Card.module.css';
+
+function Card({ highlighted }: { highlighted?: boolean }) {
+  return (
+    <div className={`${styles.card} ${highlighted ? styles.highlighted : ''}`}>
+      Content
+    </div>
+  );
+}
+```
+
+### Dynamic Class Names
+
+```tsx
+import styles from './Alert.module.css';
+
+type AlertType = 'success' | 'error' | 'warning';
+
+function Alert({ type, message }: { type: AlertType; message: string }) {
+  return (
+    <div className={`${styles.alert} ${styles[type]}`}>
+      {message}
+    </div>
+  );
+}
+```
+
+---
+
+## Composition
+
+CSS Modules support composing styles from other classes.
+
+### Local Composition
+
+```css
+/* Button.module.css */
+.base {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.primary {
+  composes: base;
+  background: blue;
+  color: white;
+}
+
+.secondary {
+  composes: base;
+  background: gray;
+  color: black;
+}
+```
+
+```tsx
+// Only need one class - composition is automatic
+<button className={styles.primary}>Primary</button>
+```
+
+### Composition from Other Files
+
+```css
+/* shared.module.css */
+.flexCenter {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+```
+
+```css
+/* Modal.module.css */
+.overlay {
+  composes: flexCenter from './shared.module.css';
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+}
+```
+
+<Callout type="info" title="Composition Order">
+Composed classes are applied first, allowing the composing class to override properties.
+</Callout>
+
+---
+
+## Global Styles in Modules
+
+### Escape Hatch with :global
+
+```css
+/* Component.module.css */
+.container {
+  padding: 20px;
+}
+
+/* This won't be hashed */
+:global(.external-library-class) {
+  color: red;
+}
+
+/* Mix local and global */
+.container :global(.third-party-element) {
+  margin: 10px;
+}
+```
+
+### Global Block
+
+```css
+:global {
+  .reset-margin {
+    margin: 0;
+  }
+
+  .reset-padding {
+    padding: 0;
+  }
+}
+```
+
+<Callout type="warn" title="Avoid Overuse">
+Excessive use of `:global` defeats the purpose of CSS Modules. Use it only for third-party library integration or truly global styles.
+</Callout>
+
+---
+
+## TypeScript Declarations
+
+### Manual Declaration
+
+Create a declaration file for type safety:
+
+```typescript
+// src/types/css-modules.d.ts
+declare module '*.module.css' {
+  const classes: { readonly [key: string]: string };
+  export default classes;
+}
+```
+
+### Generated Types with typed-css-modules
+
+For strict type checking of actual class names:
+
+```bash
+npm install -D typed-css-modules
+npx tcm src
+```
+
+This generates `.d.ts` files alongside your CSS modules:
+
+```typescript
+// Button.module.css.d.ts (auto-generated)
+declare const styles: {
+  readonly button: string;
+  readonly primary: string;
+  readonly secondary: string;
+};
+export default styles;
+```
+
+### Vite Plugin for Auto-Generation
+
+```typescript
+// vite.config.ts
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+
+export default defineConfig({
+  plugins: [react()],
+  css: {
+    modules: {
+      localsConvention: 'camelCaseOnly',
+    },
+  },
+});
+```
+
+---
+
+## Naming Conventions
+
+### File Naming
+
+| Pattern | Example |
+|---------|---------|
+| Component-scoped | `Button.module.css` |
+| Feature-scoped | `dashboard.module.css` |
+| Shared utilities | `utilities.module.css` |
+
+### Class Naming
+
+```css
+/* Prefer camelCase for easier JS access */
+.cardContainer { }
+.headerTitle { }
+.isActive { }
+
+/* Avoid kebab-case - requires bracket notation */
+.card-container { } /* styles['card-container'] */
+```
+
+### BEM-like Structure (Optional)
+
+```css
+/* Block */
+.card { }
+
+/* Element */
+.cardHeader { }
+.cardBody { }
+.cardFooter { }
+
+/* Modifier */
+.cardHighlighted { }
+.cardCompact { }
+```
+
+---
+
+## Pros and Cons
+
+### Advantages
+
+| Benefit | Description |
+|---------|-------------|
+| Scoped by default | No class name collisions |
+| Standard CSS | No new syntax to learn |
+| Build-time | Zero runtime overhead |
+| Composable | Reuse styles across files |
+| IDE support | Full CSS autocomplete |
+| Small bundles | Only used styles included |
+
+### Disadvantages
+
+| Limitation | Description |
+|------------|-------------|
+| No dynamic styles | Can't change CSS values at runtime |
+| File overhead | One CSS file per component |
+| Verbose composition | Multiple classes can be awkward |
+| Global styles | Requires escape hatch |
+
+---
+
+## When to Use
+
+### Use CSS Modules When
+
+- Building component libraries
+- Working on large teams (prevents conflicts)
+- Need predictable, scoped styles
+- Want standard CSS without runtime cost
+- Migrating from traditional CSS
+
+### Consider Alternatives When
+
+- Need extensive dynamic theming (use CSS Variables)
+- Building highly interactive animations (use inline styles for JS-driven values)
+- Team prefers co-located styles (consider style objects)
+
+---
+
+## Common Patterns
+
+### Combining with CSS Variables
+
+```css
+/* Button.module.css */
+.button {
+  background: var(--button-bg, blue);
+  color: var(--button-color, white);
+  padding: var(--button-padding, 8px 16px);
+}
+```
+
+### Conditional Classes Helper
+
+```tsx
+// Without a library - simple helper function
+function classNames(...classes: (string | undefined | false)[]): string {
+  return classes.filter(Boolean).join(' ');
+}
+
+// Usage
+import styles from './Card.module.css';
+
+function Card({ active, disabled }: { active?: boolean; disabled?: boolean }) {
+  return (
+    <div
+      className={classNames(
+        styles.card,
+        active && styles.active,
+        disabled && styles.disabled
+      )}
+    >
+      Content
+    </div>
+  );
+}
+```
+
+### Module Export Pattern
+
+```tsx
+// styles/index.ts
+export { default as buttonStyles } from './Button.module.css';
+export { default as cardStyles } from './Card.module.css';
+export { default as inputStyles } from './Input.module.css';
+```

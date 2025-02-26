@@ -1,0 +1,778 @@
+---
+title: Accessible Forms
+description: Building accessible and inclusive forms in React
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## Label Association
+
+Every form control must have an associated label. Screen readers announce the label when the input receives focus.
+
+### Using htmlFor
+
+```tsx
+function LabeledInput() {
+  return (
+    <div>
+      <label htmlFor="email">Email Address</label>
+      <input id="email" type="email" name="email" />
+    </div>
+  );
+}
+```
+
+### Wrapping Label
+
+```tsx
+function WrappingLabel() {
+  return (
+    <label>
+      Email Address
+      <input type="email" name="email" />
+    </label>
+  );
+}
+```
+
+### Visually Hidden Labels
+
+When a label would be visually redundant but still needed for screen readers:
+
+```tsx
+function SearchInput() {
+  return (
+    <div>
+      <label htmlFor="search" className="visually-hidden">
+        Search
+      </label>
+      <input
+        id="search"
+        type="search"
+        placeholder="Search..."
+        aria-label="Search" // Alternative to visually hidden label
+      />
+    </div>
+  );
+}
+
+// CSS for visually-hidden class
+// .visually-hidden {
+//   position: absolute;
+//   width: 1px;
+//   height: 1px;
+//   padding: 0;
+//   margin: -1px;
+//   overflow: hidden;
+//   clip: rect(0, 0, 0, 0);
+//   white-space: nowrap;
+//   border: 0;
+// }
+```
+
+<Callout type="warn" title="Never Skip Labels">
+Never rely solely on `placeholder` for labeling. Placeholders disappear when typing and have poor contrast in many browsers.
+</Callout>
+
+---
+
+## Error Messages
+
+### Associating Errors with Inputs
+
+```tsx
+interface FormFieldProps {
+  id: string;
+  label: string;
+  error?: string;
+  type?: string;
+  value: string;
+  onChange: (value: string) => void;
+}
+
+function FormField({ id, label, error, type = 'text', value, onChange }: FormFieldProps) {
+  const errorId = `${id}-error`;
+
+  return (
+    <div>
+      <label htmlFor={id}>{label}</label>
+      <input
+        id={id}
+        type={type}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        aria-invalid={!!error}
+        aria-describedby={error ? errorId : undefined}
+      />
+      {error && (
+        <span id={errorId} role="alert">
+          {error}
+        </span>
+      )}
+    </div>
+  );
+}
+```
+
+### Live Error Announcements
+
+```tsx
+function LiveErrorField({ id, label, error, ...props }: FormFieldProps) {
+  const errorId = `${id}-error`;
+
+  return (
+    <div>
+      <label htmlFor={id}>{label}</label>
+      <input
+        id={id}
+        aria-invalid={!!error}
+        aria-describedby={error ? errorId : undefined}
+        {...props}
+      />
+      <div
+        id={errorId}
+        role="alert"
+        aria-live="polite"
+        aria-atomic="true"
+      >
+        {error}
+      </div>
+    </div>
+  );
+}
+```
+
+### Error Summary with Focus Management
+
+```tsx
+function ErrorSummary({ errors, formRef }: {
+  errors: Record<string, string>;
+  formRef: React.RefObject<HTMLFormElement>;
+}) {
+  const summaryRef = useRef<HTMLDivElement>(null);
+  const errorList = Object.entries(errors).filter(([, msg]) => msg);
+
+  useEffect(() => {
+    if (errorList.length > 0) {
+      summaryRef.current?.focus();
+    }
+  }, [errorList.length]);
+
+  if (errorList.length === 0) return null;
+
+  return (
+    <div
+      ref={summaryRef}
+      role="alert"
+      aria-labelledby="error-summary-heading"
+      tabIndex={-1}
+    >
+      <h2 id="error-summary-heading">
+        There {errorList.length === 1 ? 'is 1 error' : `are ${errorList.length} errors`}
+      </h2>
+      <ul>
+        {errorList.map(([field, message]) => (
+          <li key={field}>
+            <a
+              href={`#${field}`}
+              onClick={(e) => {
+                e.preventDefault();
+                const input = formRef.current?.querySelector(`#${field}`);
+                (input as HTMLElement)?.focus();
+              }}
+            >
+              {message}
+            </a>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+```
+
+---
+
+## Required Fields
+
+### Marking Required Fields
+
+```tsx
+function RequiredField({ id, label, required, ...props }: FormFieldProps & { required?: boolean }) {
+  return (
+    <div>
+      <label htmlFor={id}>
+        {label}
+        {required && <span aria-hidden="true"> *</span>}
+      </label>
+      <input
+        id={id}
+        required={required}
+        aria-required={required}
+        {...props}
+      />
+    </div>
+  );
+}
+```
+
+### Required Field Legend
+
+```tsx
+function FormWithRequiredLegend() {
+  return (
+    <form>
+      <p>
+        <span aria-hidden="true">*</span> indicates required field
+      </p>
+
+      <label htmlFor="name">
+        Name <span aria-hidden="true">*</span>
+      </label>
+      <input id="name" required aria-required="true" />
+
+      <label htmlFor="phone">Phone (optional)</label>
+      <input id="phone" />
+    </form>
+  );
+}
+```
+
+---
+
+## Form Groups
+
+### Using Fieldset and Legend
+
+```tsx
+function GroupedForm() {
+  return (
+    <form>
+      <fieldset>
+        <legend>Personal Information</legend>
+        <label htmlFor="firstName">First Name</label>
+        <input id="firstName" name="firstName" />
+
+        <label htmlFor="lastName">Last Name</label>
+        <input id="lastName" name="lastName" />
+      </fieldset>
+
+      <fieldset>
+        <legend>Contact Preferences</legend>
+        <label>
+          <input type="checkbox" name="emailUpdates" />
+          Email updates
+        </label>
+        <label>
+          <input type="checkbox" name="smsUpdates" />
+          SMS updates
+        </label>
+      </fieldset>
+    </form>
+  );
+}
+```
+
+### Radio Group Accessibility
+
+```tsx
+interface RadioGroupProps {
+  legend: string;
+  name: string;
+  options: { value: string; label: string }[];
+  value: string;
+  onChange: (value: string) => void;
+  error?: string;
+}
+
+function RadioGroup({ legend, name, options, value, onChange, error }: RadioGroupProps) {
+  const groupId = `${name}-group`;
+  const errorId = `${name}-error`;
+
+  return (
+    <fieldset
+      aria-describedby={error ? errorId : undefined}
+      aria-invalid={!!error}
+    >
+      <legend>{legend}</legend>
+      {options.map((option) => (
+        <label key={option.value}>
+          <input
+            type="radio"
+            name={name}
+            value={option.value}
+            checked={value === option.value}
+            onChange={() => onChange(option.value)}
+          />
+          {option.label}
+        </label>
+      ))}
+      {error && (
+        <span id={errorId} role="alert">
+          {error}
+        </span>
+      )}
+    </fieldset>
+  );
+}
+```
+
+---
+
+## Help Text and Instructions
+
+```tsx
+function FieldWithHelp({ id, label, helpText, ...props }: FormFieldProps & { helpText: string }) {
+  const helpId = `${id}-help`;
+
+  return (
+    <div>
+      <label htmlFor={id}>{label}</label>
+      <input
+        id={id}
+        aria-describedby={helpId}
+        {...props}
+      />
+      <p id={helpId} className="help-text">
+        {helpText}
+      </p>
+    </div>
+  );
+}
+
+// Usage
+<FieldWithHelp
+  id="password"
+  label="Password"
+  type="password"
+  helpText="Must be at least 8 characters with one number"
+  value={password}
+  onChange={setPassword}
+/>
+```
+
+### Multiple Descriptions
+
+```tsx
+function FieldWithMultipleDescriptions() {
+  return (
+    <div>
+      <label htmlFor="username">Username</label>
+      <input
+        id="username"
+        aria-describedby="username-help username-error"
+      />
+      <p id="username-help">3-20 characters, letters and numbers only</p>
+      <span id="username-error" role="alert">
+        Username is already taken
+      </span>
+    </div>
+  );
+}
+```
+
+---
+
+## Focus Management
+
+### Auto-Focus First Error
+
+```tsx
+function useAutoFocusError(errors: Record<string, string>, formRef: React.RefObject<HTMLFormElement>) {
+  const prevErrorsRef = useRef<Record<string, string>>({});
+
+  useEffect(() => {
+    const prevErrors = prevErrorsRef.current;
+    const newErrorKeys = Object.keys(errors).filter(
+      (key) => errors[key] && !prevErrors[key]
+    );
+
+    if (newErrorKeys.length > 0) {
+      const firstErrorField = formRef.current?.querySelector(
+        `[name="${newErrorKeys[0]}"], #${newErrorKeys[0]}`
+      );
+      (firstErrorField as HTMLElement)?.focus();
+    }
+
+    prevErrorsRef.current = errors;
+  }, [errors, formRef]);
+}
+
+// Usage
+function FormWithAutoFocus() {
+  const formRef = useRef<HTMLFormElement>(null);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  useAutoFocusError(errors, formRef);
+
+  return <form ref={formRef}>{/* fields */}</form>;
+}
+```
+
+### Focus After Submission
+
+```tsx
+function FormWithSubmitFocus() {
+  const statusRef = useRef<HTMLDivElement>(null);
+  const [status, setStatus] = useState<'idle' | 'success' | 'error'>('idle');
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      await submitForm();
+      setStatus('success');
+      statusRef.current?.focus();
+    } catch {
+      setStatus('error');
+      statusRef.current?.focus();
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit}>
+      {/* fields */}
+
+      <div
+        ref={statusRef}
+        role="status"
+        aria-live="polite"
+        tabIndex={-1}
+      >
+        {status === 'success' && 'Form submitted successfully!'}
+        {status === 'error' && 'Submission failed. Please try again.'}
+      </div>
+
+      <button type="submit">Submit</button>
+    </form>
+  );
+}
+```
+
+---
+
+## Keyboard Navigation
+
+### Tab Order
+
+```tsx
+function ProperTabOrder() {
+  return (
+    <form>
+      {/* Natural tab order follows DOM order */}
+      <input name="first" />  {/* Tab stop 1 */}
+      <input name="second" /> {/* Tab stop 2 */}
+      <input name="third" />  {/* Tab stop 3 */}
+      <button type="submit">Submit</button> {/* Tab stop 4 */}
+    </form>
+  );
+}
+```
+
+### Skip to Form
+
+```tsx
+function PageWithForm() {
+  return (
+    <main>
+      <a href="#contact-form" className="skip-link">
+        Skip to contact form
+      </a>
+
+      {/* Page content */}
+
+      <form id="contact-form">
+        <h2>Contact Us</h2>
+        {/* form fields */}
+      </form>
+    </main>
+  );
+}
+```
+
+<Callout type="info" title="Tab Index">
+Avoid `tabindex` values greater than 0. They create confusing tab orders. Use `tabindex="0"` to make non-interactive elements focusable, and `tabindex="-1"` for programmatic focus only.
+</Callout>
+
+---
+
+## Autocomplete Attributes
+
+```tsx
+function AutocompleteForm() {
+  return (
+    <form>
+      <input name="name" autoComplete="name" />
+      <input name="email" type="email" autoComplete="email" />
+      <input name="tel" type="tel" autoComplete="tel" />
+
+      <input name="street" autoComplete="street-address" />
+      <input name="city" autoComplete="address-level2" />
+      <input name="state" autoComplete="address-level1" />
+      <input name="zip" autoComplete="postal-code" />
+      <select name="country" autoComplete="country">
+        <option value="US">United States</option>
+      </select>
+
+      <input name="ccNumber" autoComplete="cc-number" />
+      <input name="ccExp" autoComplete="cc-exp" />
+      <input name="ccCsc" autoComplete="cc-csc" />
+
+      <input name="newPassword" type="password" autoComplete="new-password" />
+      <input name="currentPassword" type="password" autoComplete="current-password" />
+    </form>
+  );
+}
+```
+
+### Common Autocomplete Values
+
+| Value | Use Case |
+|-------|----------|
+| `name` | Full name |
+| `given-name` | First name |
+| `family-name` | Last name |
+| `email` | Email address |
+| `tel` | Phone number |
+| `street-address` | Street address |
+| `postal-code` | ZIP/postal code |
+| `country` | Country |
+| `cc-number` | Credit card number |
+| `new-password` | New password (signup) |
+| `current-password` | Existing password (login) |
+| `one-time-code` | OTP/2FA codes |
+
+---
+
+## Loading and Disabled States
+
+```tsx
+function AccessibleSubmitButton({ isLoading, disabled }: {
+  isLoading: boolean;
+  disabled: boolean;
+}) {
+  return (
+    <button
+      type="submit"
+      disabled={disabled || isLoading}
+      aria-disabled={disabled || isLoading}
+      aria-busy={isLoading}
+    >
+      {isLoading ? (
+        <>
+          <span className="visually-hidden">Submitting</span>
+          <span aria-hidden="true">Submitting...</span>
+        </>
+      ) : (
+        'Submit'
+      )}
+    </button>
+  );
+}
+```
+
+### Form-Level Loading State
+
+```tsx
+function AccessibleLoadingForm() {
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  return (
+    <form aria-busy={isSubmitting}>
+      <fieldset disabled={isSubmitting}>
+        {/* fields */}
+        <button type="submit">
+          {isSubmitting ? 'Submitting...' : 'Submit'}
+        </button>
+      </fieldset>
+
+      {isSubmitting && (
+        <div role="status" aria-live="polite">
+          Processing your submission...
+        </div>
+      )}
+    </form>
+  );
+}
+```
+
+---
+
+## Custom Form Controls
+
+### Accessible Custom Checkbox
+
+```tsx
+interface CustomCheckboxProps {
+  id: string;
+  label: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}
+
+function CustomCheckbox({ id, label, checked, onChange }: CustomCheckboxProps) {
+  return (
+    <label htmlFor={id} className="custom-checkbox">
+      <input
+        id={id}
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        className="visually-hidden"
+      />
+      <span className="checkbox-indicator" aria-hidden="true">
+        {checked ? '✓' : ''}
+      </span>
+      {label}
+    </label>
+  );
+}
+```
+
+### Accessible Custom Select
+
+```tsx
+function CustomSelect({ id, label, options, value, onChange }: SelectProps) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [focusedIndex, setFocusedIndex] = useState(-1);
+  const listRef = useRef<HTMLUListElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    switch (e.key) {
+      case 'ArrowDown':
+        e.preventDefault();
+        setFocusedIndex((i) => Math.min(i + 1, options.length - 1));
+        break;
+      case 'ArrowUp':
+        e.preventDefault();
+        setFocusedIndex((i) => Math.max(i - 1, 0));
+        break;
+      case 'Enter':
+      case ' ':
+        e.preventDefault();
+        if (isOpen && focusedIndex >= 0) {
+          onChange(options[focusedIndex].value);
+          setIsOpen(false);
+          buttonRef.current?.focus();
+        } else {
+          setIsOpen(true);
+        }
+        break;
+      case 'Escape':
+        setIsOpen(false);
+        buttonRef.current?.focus();
+        break;
+    }
+  };
+
+  const selectedOption = options.find((o) => o.value === value);
+
+  return (
+    <div>
+      <label id={`${id}-label`}>{label}</label>
+      <button
+        ref={buttonRef}
+        type="button"
+        id={id}
+        aria-haspopup="listbox"
+        aria-expanded={isOpen}
+        aria-labelledby={`${id}-label ${id}`}
+        onClick={() => setIsOpen(!isOpen)}
+        onKeyDown={handleKeyDown}
+      >
+        {selectedOption?.label ?? 'Select...'}
+      </button>
+      {isOpen && (
+        <ul
+          ref={listRef}
+          role="listbox"
+          aria-labelledby={`${id}-label`}
+          tabIndex={-1}
+        >
+          {options.map((option, index) => (
+            <li
+              key={option.value}
+              role="option"
+              aria-selected={option.value === value}
+              className={index === focusedIndex ? 'focused' : ''}
+              onClick={() => {
+                onChange(option.value);
+                setIsOpen(false);
+                buttonRef.current?.focus();
+              }}
+            >
+              {option.label}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+```
+
+---
+
+## ARIA Reference
+
+### Form-Related ARIA Attributes
+
+| Attribute | Purpose |
+|-----------|---------|
+| `aria-required` | Indicates required field |
+| `aria-invalid` | Indicates validation error |
+| `aria-describedby` | Links to help text or errors |
+| `aria-labelledby` | Links to label element(s) |
+| `aria-disabled` | Indicates disabled state |
+| `aria-busy` | Indicates loading state |
+| `aria-live` | Announces dynamic content changes |
+| `aria-expanded` | Indicates expandable state |
+| `aria-haspopup` | Indicates popup menu/listbox |
+
+---
+
+## When to Use Each Technique
+
+| Technique | Use Case |
+|-----------|----------|
+| `htmlFor` + `id` | Standard label association |
+| Wrapping label | Simple inputs without IDs |
+| `aria-label` | Icon-only buttons, search inputs |
+| `aria-describedby` | Help text, error messages |
+| `aria-live` | Dynamic announcements |
+| `fieldset` + `legend` | Related field groups, radio groups |
+| `role="alert"` | Error messages needing immediate attention |
+| `role="status"` | Non-urgent status updates |
+
+---
+
+## When NOT to Use
+
+| Pattern | Avoid When |
+|---------|------------|
+| `aria-label` | Visible label is possible |
+| `tabindex > 0` | Always; use DOM order instead |
+| Placeholder as label | Always; use proper labels |
+| Custom controls | Native elements suffice |
+| `aria-hidden` on errors | Always; errors need announcing |
+
+---
+
+## Accessibility Checklist
+
+| Requirement | Implementation |
+|-------------|----------------|
+| All inputs have labels | `<label>` with `htmlFor` or wrapping |
+| Errors are announced | `role="alert"` or `aria-live` |
+| Errors link to inputs | `aria-describedby` |
+| Required fields marked | `aria-required` + visual indicator |
+| Focus visible | CSS `:focus` styles |
+| Focus managed | Auto-focus first error |
+| Keyboard navigable | Logical tab order |
+| Color not sole indicator | Icons, text, patterns |
+| Instructions provided | `aria-describedby` |
+| Autocomplete enabled | `autocomplete` attribute |
+
+<Callout type="warn" title="Testing">
+Test forms with keyboard only (no mouse) and with a screen reader (VoiceOver, NVDA, or JAWS) to verify accessibility.
+</Callout>

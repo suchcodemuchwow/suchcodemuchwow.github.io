@@ -1,0 +1,758 @@
+---
+title: Form Validation
+description: Patterns for validating forms in React without third-party libraries
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## Validation Strategies
+
+| Strategy | When Validated | User Experience | Implementation |
+|----------|---------------|-----------------|----------------|
+| On Submit | Form submission | Delayed feedback | Simplest |
+| On Blur | Field loses focus | Balanced | Moderate |
+| On Change | Every keystroke | Immediate | Most complex |
+| Hybrid | Blur first, then change | Best UX | Recommended |
+
+---
+
+## Basic Submit Validation
+
+```tsx
+interface FormErrors {
+  email?: string;
+  password?: string;
+}
+
+function LoginForm() {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [errors, setErrors] = useState<FormErrors>({});
+
+  const validate = (): boolean => {
+    const newErrors: FormErrors = {};
+
+    if (!email) {
+      newErrors.email = 'Email is required';
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      newErrors.email = 'Invalid email format';
+    }
+
+    if (!password) {
+      newErrors.password = 'Password is required';
+    } else if (password.length < 8) {
+      newErrors.password = 'Password must be at least 8 characters';
+    }
+
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (validate()) {
+      console.log('Form is valid, submitting...');
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <div>
+        <input
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          aria-invalid={!!errors.email}
+          aria-describedby={errors.email ? 'email-error' : undefined}
+        />
+        {errors.email && <span id="email-error">{errors.email}</span>}
+      </div>
+      <div>
+        <input
+          type="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          aria-invalid={!!errors.password}
+          aria-describedby={errors.password ? 'password-error' : undefined}
+        />
+        {errors.password && <span id="password-error">{errors.password}</span>}
+      </div>
+      <button type="submit">Login</button>
+    </form>
+  );
+}
+```
+
+---
+
+## Blur Validation
+
+```tsx
+function BlurValidationForm() {
+  const [values, setValues] = useState({ email: '', name: '' });
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [touched, setTouched] = useState<Record<string, boolean>>({});
+
+  const validateField = (name: string, value: string): string | undefined => {
+    switch (name) {
+      case 'email':
+        if (!value) return 'Email is required';
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) return 'Invalid email';
+        return undefined;
+      case 'name':
+        if (!value) return 'Name is required';
+        if (value.length < 2) return 'Name must be at least 2 characters';
+        return undefined;
+      default:
+        return undefined;
+    }
+  };
+
+  const handleBlur = (name: string) => {
+    setTouched((prev) => ({ ...prev, [name]: true }));
+    const error = validateField(name, values[name as keyof typeof values]);
+    setErrors((prev) => ({ ...prev, [name]: error ?? '' }));
+  };
+
+  const handleChange = (name: string, value: string) => {
+    setValues((prev) => ({ ...prev, [name]: value }));
+    // Clear error when user starts typing (optional)
+    if (errors[name]) {
+      setErrors((prev) => ({ ...prev, [name]: '' }));
+    }
+  };
+
+  return (
+    <form>
+      <div>
+        <input
+          value={values.email}
+          onChange={(e) => handleChange('email', e.target.value)}
+          onBlur={() => handleBlur('email')}
+        />
+        {touched.email && errors.email && <span>{errors.email}</span>}
+      </div>
+      <div>
+        <input
+          value={values.name}
+          onChange={(e) => handleChange('name', e.target.value)}
+          onBlur={() => handleBlur('name')}
+        />
+        {touched.name && errors.name && <span>{errors.name}</span>}
+      </div>
+    </form>
+  );
+}
+```
+
+---
+
+## Hybrid Validation (Recommended)
+
+Validate on blur first, then on every change after field has been touched.
+
+```tsx
+interface FieldState {
+  value: string;
+  error: string;
+  touched: boolean;
+}
+
+function useField(initialValue: string, validate: (value: string) => string | undefined) {
+  const [state, setState] = useState<FieldState>({
+    value: initialValue,
+    error: '',
+    touched: false,
+  });
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newValue = e.target.value;
+    setState((prev) => ({
+      ...prev,
+      value: newValue,
+      // Only validate on change if already touched
+      error: prev.touched ? (validate(newValue) ?? '') : prev.error,
+    }));
+  };
+
+  const handleBlur = () => {
+    setState((prev) => ({
+      ...prev,
+      touched: true,
+      error: validate(prev.value) ?? '',
+    }));
+  };
+
+  return {
+    value: state.value,
+    error: state.error,
+    touched: state.touched,
+    onChange: handleChange,
+    onBlur: handleBlur,
+  };
+}
+
+// Usage
+function SignupForm() {
+  const email = useField('', (value) => {
+    if (!value) return 'Required';
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) return 'Invalid email';
+    return undefined;
+  });
+
+  const password = useField('', (value) => {
+    if (!value) return 'Required';
+    if (value.length < 8) return 'Min 8 characters';
+    return undefined;
+  });
+
+  return (
+    <form>
+      <input {...email} type="email" />
+      {email.touched && email.error && <span>{email.error}</span>}
+
+      <input {...password} type="password" />
+      {password.touched && password.error && <span>{password.error}</span>}
+    </form>
+  );
+}
+```
+
+---
+
+## Validation Functions
+
+### Common Validators
+
+```tsx
+const validators = {
+  required: (value: string) =>
+    value.trim() ? undefined : 'This field is required',
+
+  email: (value: string) =>
+    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value) ? undefined : 'Invalid email',
+
+  minLength: (min: number) => (value: string) =>
+    value.length >= min ? undefined : `Must be at least ${min} characters`,
+
+  maxLength: (max: number) => (value: string) =>
+    value.length <= max ? undefined : `Must be at most ${max} characters`,
+
+  pattern: (regex: RegExp, message: string) => (value: string) =>
+    regex.test(value) ? undefined : message,
+
+  match: (otherValue: string, fieldName: string) => (value: string) =>
+    value === otherValue ? undefined : `Must match ${fieldName}`,
+
+  numeric: (value: string) =>
+    /^\d+$/.test(value) ? undefined : 'Must be a number',
+
+  url: (value: string) => {
+    try {
+      new URL(value);
+      return undefined;
+    } catch {
+      return 'Invalid URL';
+    }
+  },
+};
+```
+
+### Composing Validators
+
+```tsx
+type Validator = (value: string) => string | undefined;
+
+function composeValidators(...validators: Validator[]): Validator {
+  return (value: string) => {
+    for (const validate of validators) {
+      const error = validate(value);
+      if (error) return error;
+    }
+    return undefined;
+  };
+}
+
+// Usage
+const validateEmail = composeValidators(
+  validators.required,
+  validators.email
+);
+
+const validatePassword = composeValidators(
+  validators.required,
+  validators.minLength(8),
+  validators.pattern(
+    /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/,
+    'Must contain lowercase, uppercase, and number'
+  )
+);
+```
+
+---
+
+## Form-Level Validation Hook
+
+```tsx
+interface FormConfig<T> {
+  initialValues: T;
+  validate: (values: T) => Partial<Record<keyof T, string>>;
+  onSubmit: (values: T) => void | Promise<void>;
+}
+
+function useForm<T extends Record<string, unknown>>({
+  initialValues,
+  validate,
+  onSubmit,
+}: FormConfig<T>) {
+  const [values, setValues] = useState<T>(initialValues);
+  const [errors, setErrors] = useState<Partial<Record<keyof T, string>>>({});
+  const [touched, setTouched] = useState<Partial<Record<keyof T, boolean>>>({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const handleChange = (name: keyof T) => (
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const value = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
+    setValues((prev) => ({ ...prev, [name]: value }));
+
+    if (touched[name]) {
+      const fieldErrors = validate({ ...values, [name]: value });
+      setErrors((prev) => ({ ...prev, [name]: fieldErrors[name] }));
+    }
+  };
+
+  const handleBlur = (name: keyof T) => () => {
+    setTouched((prev) => ({ ...prev, [name]: true }));
+    const fieldErrors = validate(values);
+    setErrors((prev) => ({ ...prev, [name]: fieldErrors[name] }));
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    // Mark all fields as touched
+    const allTouched = Object.keys(values).reduce(
+      (acc, key) => ({ ...acc, [key]: true }),
+      {} as Record<keyof T, boolean>
+    );
+    setTouched(allTouched);
+
+    // Validate all fields
+    const formErrors = validate(values);
+    setErrors(formErrors);
+
+    if (Object.keys(formErrors).length === 0) {
+      setIsSubmitting(true);
+      try {
+        await onSubmit(values);
+      } finally {
+        setIsSubmitting(false);
+      }
+    }
+  };
+
+  const getFieldProps = (name: keyof T) => ({
+    value: values[name],
+    onChange: handleChange(name),
+    onBlur: handleBlur(name),
+    'aria-invalid': touched[name] && !!errors[name],
+  });
+
+  return {
+    values,
+    errors,
+    touched,
+    isSubmitting,
+    handleSubmit,
+    getFieldProps,
+    setValues,
+    setErrors,
+  };
+}
+
+// Usage
+function RegistrationForm() {
+  const form = useForm({
+    initialValues: {
+      email: '',
+      password: '',
+      confirmPassword: '',
+    },
+    validate: (values) => {
+      const errors: Record<string, string> = {};
+      if (!values.email) errors.email = 'Required';
+      if (!values.password) errors.password = 'Required';
+      if (values.password !== values.confirmPassword) {
+        errors.confirmPassword = 'Passwords must match';
+      }
+      return errors;
+    },
+    onSubmit: async (values) => {
+      await registerUser(values);
+    },
+  });
+
+  return (
+    <form onSubmit={form.handleSubmit}>
+      <input type="email" {...form.getFieldProps('email')} />
+      {form.touched.email && form.errors.email && (
+        <span>{form.errors.email}</span>
+      )}
+
+      <input type="password" {...form.getFieldProps('password')} />
+      {form.touched.password && form.errors.password && (
+        <span>{form.errors.password}</span>
+      )}
+
+      <input type="password" {...form.getFieldProps('confirmPassword')} />
+      {form.touched.confirmPassword && form.errors.confirmPassword && (
+        <span>{form.errors.confirmPassword}</span>
+      )}
+
+      <button type="submit" disabled={form.isSubmitting}>
+        {form.isSubmitting ? 'Submitting...' : 'Register'}
+      </button>
+    </form>
+  );
+}
+```
+
+---
+
+## Async Validation
+
+```tsx
+function useAsyncValidation<T>(
+  value: T,
+  validate: (value: T) => Promise<string | undefined>,
+  debounceMs: number = 300
+) {
+  const [error, setError] = useState<string>();
+  const [isValidating, setIsValidating] = useState(false);
+
+  useEffect(() => {
+    const timeoutId = setTimeout(async () => {
+      setIsValidating(true);
+      try {
+        const result = await validate(value);
+        setError(result);
+      } finally {
+        setIsValidating(false);
+      }
+    }, debounceMs);
+
+    return () => clearTimeout(timeoutId);
+  }, [value, validate, debounceMs]);
+
+  return { error, isValidating };
+}
+
+// Usage: Check if username is available
+function UsernameField() {
+  const [username, setUsername] = useState('');
+
+  const { error, isValidating } = useAsyncValidation(
+    username,
+    async (value) => {
+      if (!value) return 'Username required';
+      if (value.length < 3) return 'Min 3 characters';
+
+      const response = await fetch(`/api/check-username?username=${value}`);
+      const { available } = await response.json();
+      return available ? undefined : 'Username taken';
+    }
+  );
+
+  return (
+    <div>
+      <input
+        value={username}
+        onChange={(e) => setUsername(e.target.value)}
+        aria-invalid={!!error}
+      />
+      {isValidating && <span>Checking...</span>}
+      {!isValidating && error && <span>{error}</span>}
+    </div>
+  );
+}
+```
+
+---
+
+## Native HTML5 Validation
+
+```tsx
+function HTML5ValidationForm() {
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  const handleInvalid = (e: React.FormEvent<HTMLInputElement>) => {
+    e.preventDefault();
+    const input = e.currentTarget;
+    setErrors((prev) => ({
+      ...prev,
+      [input.name]: input.validationMessage,
+    }));
+  };
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const input = e.target;
+    if (input.validity.valid) {
+      setErrors((prev) => ({ ...prev, [input.name]: '' }));
+    }
+  };
+
+  return (
+    <form noValidate>
+      <input
+        name="email"
+        type="email"
+        required
+        onInvalid={handleInvalid}
+        onChange={handleChange}
+      />
+      {errors.email && <span>{errors.email}</span>}
+
+      <input
+        name="age"
+        type="number"
+        min={18}
+        max={120}
+        required
+        onInvalid={handleInvalid}
+        onChange={handleChange}
+      />
+      {errors.age && <span>{errors.age}</span>}
+
+      <button type="submit">Submit</button>
+    </form>
+  );
+}
+```
+
+<Callout type="info" title="noValidate">
+Add `noValidate` to the form to prevent browser default validation UI while still using the Constraint Validation API.
+</Callout>
+
+---
+
+## Using Constraint Validation API
+
+```tsx
+function ConstraintValidationForm() {
+  const formRef = useRef<HTMLFormElement>(null);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  const validateForm = (): boolean => {
+    const form = formRef.current;
+    if (!form) return false;
+
+    const newErrors: Record<string, string> = {};
+    const inputs = form.querySelectorAll('input, select, textarea');
+
+    inputs.forEach((input) => {
+      const el = input as HTMLInputElement;
+      if (!el.validity.valid) {
+        newErrors[el.name] = el.validationMessage;
+      }
+    });
+
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (validateForm()) {
+      console.log('Form is valid');
+    }
+  };
+
+  return (
+    <form ref={formRef} onSubmit={handleSubmit} noValidate>
+      <input
+        name="website"
+        type="url"
+        required
+        aria-invalid={!!errors.website}
+      />
+      {errors.website && <span>{errors.website}</span>}
+
+      <input
+        name="quantity"
+        type="number"
+        min={1}
+        max={100}
+        required
+        aria-invalid={!!errors.quantity}
+      />
+      {errors.quantity && <span>{errors.quantity}</span>}
+
+      <button type="submit">Submit</button>
+    </form>
+  );
+}
+```
+
+---
+
+## Cross-Field Validation
+
+```tsx
+interface PasswordFormValues {
+  password: string;
+  confirmPassword: string;
+}
+
+function PasswordForm() {
+  const [values, setValues] = useState<PasswordFormValues>({
+    password: '',
+    confirmPassword: '',
+  });
+  const [errors, setErrors] = useState<Partial<PasswordFormValues>>({});
+
+  const validate = (vals: PasswordFormValues) => {
+    const errs: Partial<PasswordFormValues> = {};
+
+    if (!vals.password) {
+      errs.password = 'Password required';
+    } else if (vals.password.length < 8) {
+      errs.password = 'Min 8 characters';
+    }
+
+    if (!vals.confirmPassword) {
+      errs.confirmPassword = 'Please confirm password';
+    } else if (vals.password !== vals.confirmPassword) {
+      errs.confirmPassword = 'Passwords do not match';
+    }
+
+    return errs;
+  };
+
+  const handleChange = (field: keyof PasswordFormValues) => (
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const newValues = { ...values, [field]: e.target.value };
+    setValues(newValues);
+    setErrors(validate(newValues));
+  };
+
+  return (
+    <form>
+      <input
+        type="password"
+        value={values.password}
+        onChange={handleChange('password')}
+        aria-invalid={!!errors.password}
+      />
+      {errors.password && <span>{errors.password}</span>}
+
+      <input
+        type="password"
+        value={values.confirmPassword}
+        onChange={handleChange('confirmPassword')}
+        aria-invalid={!!errors.confirmPassword}
+      />
+      {errors.confirmPassword && <span>{errors.confirmPassword}</span>}
+    </form>
+  );
+}
+```
+
+---
+
+## Error Display Patterns
+
+### Inline Errors
+
+```tsx
+function InlineError({ message }: { message: string }) {
+  return (
+    <span role="alert" className="error">
+      {message}
+    </span>
+  );
+}
+
+function FormField({ label, error, children }: {
+  label: string;
+  error?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="field">
+      <label>{label}</label>
+      {children}
+      {error && <InlineError message={error} />}
+    </div>
+  );
+}
+```
+
+### Error Summary
+
+```tsx
+function ErrorSummary({ errors }: { errors: Record<string, string> }) {
+  const errorList = Object.entries(errors).filter(([, msg]) => msg);
+
+  if (errorList.length === 0) return null;
+
+  return (
+    <div role="alert" aria-labelledby="error-summary-title">
+      <h2 id="error-summary-title">Please fix the following errors:</h2>
+      <ul>
+        {errorList.map(([field, message]) => (
+          <li key={field}>
+            <a href={`#${field}`}>{message}</a>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+```
+
+---
+
+## When to Use Each Strategy
+
+### On Submit
+
+| Use When | Avoid When |
+|----------|------------|
+| Simple forms | Complex validation rules |
+| Few fields | Many required fields |
+| Non-critical data | Real-time feedback needed |
+| Legacy integration | Modern UX expected |
+
+### On Blur
+
+| Use When | Avoid When |
+|----------|------------|
+| Medium complexity forms | Very simple forms |
+| User expects feedback | Submit-only validation OK |
+| Field-specific validation | Cross-field dependencies |
+
+### On Change (Hybrid)
+
+| Use When | Avoid When |
+|----------|------------|
+| Best UX needed | Performance is critical |
+| Complex validation | Simple forms |
+| Async validation | Many fields with heavy validation |
+
+---
+
+## Pros and Cons by Strategy
+
+| Strategy | Pros | Cons |
+|----------|------|------|
+| Submit | Simple, less re-renders | Delayed feedback |
+| Blur | Balanced UX | More state to manage |
+| Change | Immediate feedback | More re-renders |
+| Hybrid | Best UX | Most complex |
+| HTML5 | Zero JS needed | Limited customization |
+
+<Callout type="warn" title="Accessibility">
+Always associate error messages with inputs using `aria-describedby` and mark invalid fields with `aria-invalid`.
+</Callout>

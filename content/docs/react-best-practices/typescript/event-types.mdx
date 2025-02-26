@@ -1,0 +1,433 @@
+---
+title: Event Handler Types
+description: Complete guide to typing React event handlers including mouse, keyboard, form, and custom events.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## Overview
+
+React provides synthetic event types that wrap native browser events. Properly typing these events ensures type safety for event handlers and access to event-specific properties.
+
+## Event Type Structure
+
+React event types follow a consistent pattern:
+
+```
+React.[EventCategory]Event<[HTMLElement]>
+```
+
+## Mouse Events
+
+### Click Events
+
+```tsx
+function ClickableCard() {
+  const handleClick = (event: React.MouseEvent<HTMLDivElement>) => {
+    console.log('Clicked at:', event.clientX, event.clientY);
+    console.log('Target:', event.currentTarget.className);
+  };
+
+  return (
+    <div onClick={handleClick} className="card">
+      Click me
+    </div>
+  );
+}
+```
+
+### Common Mouse Events
+
+| Event Type | Trigger |
+|------------|---------|
+| `onClick` | Element clicked |
+| `onDoubleClick` | Element double-clicked |
+| `onMouseDown` | Mouse button pressed |
+| `onMouseUp` | Mouse button released |
+| `onMouseEnter` | Mouse enters element |
+| `onMouseLeave` | Mouse leaves element |
+| `onMouseMove` | Mouse moves over element |
+| `onContextMenu` | Right-click context menu |
+
+### Mouse Event Properties
+
+```tsx
+function MouseTracker() {
+  const handleMouseMove = (event: React.MouseEvent<HTMLDivElement>) => {
+    // Position relative to viewport
+    const { clientX, clientY } = event;
+
+    // Position relative to page
+    const { pageX, pageY } = event;
+
+    // Position relative to element
+    const rect = event.currentTarget.getBoundingClientRect();
+    const relativeX = clientX - rect.left;
+    const relativeY = clientY - rect.top;
+
+    // Modifier keys
+    const { altKey, ctrlKey, shiftKey, metaKey } = event;
+
+    // Mouse button (0: left, 1: middle, 2: right)
+    const { button } = event;
+  };
+
+  return <div onMouseMove={handleMouseMove}>Track mouse</div>;
+}
+```
+
+## Keyboard Events
+
+### Basic Keyboard Handling
+
+```tsx
+function SearchInput() {
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      console.log('Search submitted');
+    }
+
+    if (event.key === 'Escape') {
+      event.currentTarget.blur();
+    }
+  };
+
+  return <input type="text" onKeyDown={handleKeyDown} />;
+}
+```
+
+### Keyboard Event Properties
+
+```tsx
+function KeyboardDemo() {
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    // Modern key property (recommended)
+    console.log('Key:', event.key); // 'a', 'Enter', 'ArrowUp', etc.
+
+    // Key code (physical key)
+    console.log('Code:', event.code); // 'KeyA', 'Enter', 'ArrowUp'
+
+    // Modifier keys
+    const { altKey, ctrlKey, shiftKey, metaKey } = event;
+
+    // Detect keyboard shortcuts
+    if (ctrlKey && event.key === 's') {
+      event.preventDefault();
+      console.log('Save shortcut triggered');
+    }
+  };
+
+  return <input onKeyDown={handleKeyDown} />;
+}
+```
+
+<Callout type="warn">
+Avoid using deprecated properties like `keyCode` and `charCode`. Use `event.key` for character keys and `event.code` for physical keys.
+</Callout>
+
+## Form Events
+
+### Input Change Events
+
+```tsx
+function FormExample() {
+  const [text, setText] = useState('');
+  const [selected, setSelected] = useState('');
+
+  const handleInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setText(event.target.value);
+  };
+
+  const handleSelectChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
+    setSelected(event.target.value);
+  };
+
+  const handleTextareaChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setText(event.target.value);
+  };
+
+  return (
+    <form>
+      <input type="text" onChange={handleInputChange} />
+      <select onChange={handleSelectChange}>
+        <option value="a">A</option>
+        <option value="b">B</option>
+      </select>
+      <textarea onChange={handleTextareaChange} />
+    </form>
+  );
+}
+```
+
+### Form Submission
+
+```tsx
+interface LoginFormData {
+  email: string;
+  password: string;
+}
+
+function LoginForm() {
+  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    const formData = new FormData(event.currentTarget);
+    const data: LoginFormData = {
+      email: formData.get('email') as string,
+      password: formData.get('password') as string,
+    };
+
+    console.log('Submitting:', data);
+  };
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <input name="email" type="email" required />
+      <input name="password" type="password" required />
+      <button type="submit">Login</button>
+    </form>
+  );
+}
+```
+
+## Focus Events
+
+```tsx
+function FocusDemo() {
+  const handleFocus = (event: React.FocusEvent<HTMLInputElement>) => {
+    console.log('Focused:', event.target.name);
+  };
+
+  const handleBlur = (event: React.FocusEvent<HTMLInputElement>) => {
+    console.log('Blurred:', event.target.name);
+    console.log('Related target:', event.relatedTarget);
+  };
+
+  return (
+    <input
+      name="username"
+      onFocus={handleFocus}
+      onBlur={handleBlur}
+    />
+  );
+}
+```
+
+## Drag Events
+
+```tsx
+function DraggableItem() {
+  const handleDragStart = (event: React.DragEvent<HTMLDivElement>) => {
+    event.dataTransfer.setData('text/plain', 'item-id');
+    event.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleDragOver = (event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+  };
+
+  const handleDrop = (event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const data = event.dataTransfer.getData('text/plain');
+    console.log('Dropped:', data);
+  };
+
+  return (
+    <>
+      <div draggable onDragStart={handleDragStart}>
+        Drag me
+      </div>
+      <div onDragOver={handleDragOver} onDrop={handleDrop}>
+        Drop here
+      </div>
+    </>
+  );
+}
+```
+
+## Touch Events
+
+```tsx
+function TouchDemo() {
+  const handleTouchStart = (event: React.TouchEvent<HTMLDivElement>) => {
+    const touch = event.touches[0];
+    console.log('Touch at:', touch.clientX, touch.clientY);
+  };
+
+  const handleTouchMove = (event: React.TouchEvent<HTMLDivElement>) => {
+    const touch = event.touches[0];
+    console.log('Moving:', touch.clientX, touch.clientY);
+  };
+
+  const handleTouchEnd = (event: React.TouchEvent<HTMLDivElement>) => {
+    console.log('Touch ended');
+  };
+
+  return (
+    <div
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+    >
+      Touch me
+    </div>
+  );
+}
+```
+
+## Clipboard Events
+
+```tsx
+function ClipboardDemo() {
+  const handleCopy = (event: React.ClipboardEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.clipboardData.setData('text/plain', 'Custom copied text');
+  };
+
+  const handlePaste = (event: React.ClipboardEvent<HTMLInputElement>) => {
+    const pastedText = event.clipboardData.getData('text/plain');
+    console.log('Pasted:', pastedText);
+  };
+
+  return (
+    <>
+      <div onCopy={handleCopy}>Copy me</div>
+      <input onPaste={handlePaste} />
+    </>
+  );
+}
+```
+
+## Event Handler Type Aliases
+
+For props that accept event handlers:
+
+```tsx
+interface InteractiveCardProps {
+  onClick?: React.MouseEventHandler<HTMLDivElement>;
+  onKeyDown?: React.KeyboardEventHandler<HTMLDivElement>;
+  onFocus?: React.FocusEventHandler<HTMLDivElement>;
+}
+
+function InteractiveCard({ onClick, onKeyDown, onFocus }: InteractiveCardProps) {
+  return (
+    <div
+      tabIndex={0}
+      onClick={onClick}
+      onKeyDown={onKeyDown}
+      onFocus={onFocus}
+    >
+      Interactive Card
+    </div>
+  );
+}
+```
+
+## Event Type Quick Reference
+
+| Category | Event Type | Handler Type |
+|----------|------------|--------------|
+| Mouse | `React.MouseEvent<T>` | `React.MouseEventHandler<T>` |
+| Keyboard | `React.KeyboardEvent<T>` | `React.KeyboardEventHandler<T>` |
+| Form Change | `React.ChangeEvent<T>` | `React.ChangeEventHandler<T>` |
+| Form Submit | `React.FormEvent<T>` | `React.FormEventHandler<T>` |
+| Focus | `React.FocusEvent<T>` | `React.FocusEventHandler<T>` |
+| Touch | `React.TouchEvent<T>` | `React.TouchEventHandler<T>` |
+| Drag | `React.DragEvent<T>` | `React.DragEventHandler<T>` |
+| Clipboard | `React.ClipboardEvent<T>` | `React.ClipboardEventHandler<T>` |
+| Wheel | `React.WheelEvent<T>` | `React.WheelEventHandler<T>` |
+| Pointer | `React.PointerEvent<T>` | `React.PointerEventHandler<T>` |
+
+## Pros and Cons
+
+### Using Event Types Directly
+
+| Pros | Cons |
+|------|------|
+| Full access to event properties | More verbose |
+| Type narrowing works well | Need to specify element type |
+| IDE autocomplete | - |
+
+### Using Handler Types
+
+| Pros | Cons |
+|------|------|
+| Concise for props | Less explicit |
+| Standard React pattern | Element type in generic |
+| Self-documenting | - |
+
+## When to Use
+
+| Scenario | Approach |
+|----------|----------|
+| Inline handlers | Let TypeScript infer the type |
+| Standalone functions | Explicitly type the event parameter |
+| Props interfaces | Use handler types (`React.MouseEventHandler<T>`) |
+| Generic components | Pass element type through generic |
+
+## When NOT to Use
+
+| Scenario | Reason |
+|----------|--------|
+| Inline handlers with inference | Unnecessary verbosity |
+| `any` for event types | Loses type safety |
+| `Event` instead of `React.*Event` | Misses React-specific properties |
+
+<Callout type="info">
+The generic parameter (`<HTMLDivElement>`, `<HTMLInputElement>`, etc.) determines the type of `event.currentTarget`. Use the specific HTML element type for proper autocomplete.
+</Callout>
+
+## Common Patterns
+
+### Unified Handler for Multiple Inputs
+
+```tsx
+function MultiInputForm() {
+  const [values, setValues] = useState({ name: '', email: '' });
+
+  const handleChange = (
+    event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
+  ) => {
+    const { name, value } = event.target;
+    setValues((prev) => ({ ...prev, [name]: value }));
+  };
+
+  return (
+    <form>
+      <input name="name" value={values.name} onChange={handleChange} />
+      <input name="email" value={values.email} onChange={handleChange} />
+    </form>
+  );
+}
+```
+
+### Event Delegation
+
+```tsx
+function ListWithDelegation() {
+  const handleClick = (event: React.MouseEvent<HTMLUListElement>) => {
+    const target = event.target as HTMLElement;
+    if (target.tagName === 'LI') {
+      console.log('Clicked item:', target.textContent);
+    }
+  };
+
+  return (
+    <ul onClick={handleClick}>
+      <li>Item 1</li>
+      <li>Item 2</li>
+      <li>Item 3</li>
+    </ul>
+  );
+}
+```
+
+## Best Practices
+
+1. **Use specific element types** in generics for better autocomplete
+2. **Prefer `event.currentTarget`** over `event.target` for typed access
+3. **Let TypeScript infer** types for inline handlers
+4. **Use handler types** for props interfaces
+5. **Avoid type assertions** unless necessary (event delegation is an exception)

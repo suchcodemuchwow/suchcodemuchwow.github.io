@@ -1,0 +1,746 @@
+---
+title: End-to-End Testing with Playwright
+description: Comprehensive guide to E2E testing React applications with Playwright, including setup, page objects, visual testing, and CI integration
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+# End-to-End Testing with Playwright
+
+Playwright is a modern E2E testing framework that supports all major browsers with a single API. It provides reliable cross-browser testing, auto-waiting, and powerful debugging tools.
+
+## Setup
+
+### Installation
+
+```bash
+npm init playwright@latest
+```
+
+This creates:
+- `playwright.config.ts` - Configuration file
+- `tests/` - Test directory
+- `tests-examples/` - Example tests
+
+### Configuration
+
+```typescript
+// playwright.config.ts
+import { defineConfig, devices } from '@playwright/test';
+
+export default defineConfig({
+  testDir: './e2e',
+  fullyParallel: true,
+  forbidOnly: !!process.env.CI,
+  retries: process.env.CI ? 2 : 0,
+  workers: process.env.CI ? 1 : undefined,
+  reporter: [['html'], ['list']],
+
+  use: {
+    baseURL: 'http://localhost:3000',
+    trace: 'on-first-retry',
+    screenshot: 'only-on-failure',
+    video: 'retain-on-failure',
+  },
+
+  projects: [
+    {
+      name: 'chromium',
+      use: { ...devices['Desktop Chrome'] },
+    },
+    {
+      name: 'firefox',
+      use: { ...devices['Desktop Firefox'] },
+    },
+    {
+      name: 'webkit',
+      use: { ...devices['Desktop Safari'] },
+    },
+    {
+      name: 'Mobile Chrome',
+      use: { ...devices['Pixel 5'] },
+    },
+    {
+      name: 'Mobile Safari',
+      use: { ...devices['iPhone 12'] },
+    },
+  ],
+
+  webServer: {
+    command: 'npm run dev',
+    url: 'http://localhost:3000',
+    reuseExistingServer: !process.env.CI,
+  },
+});
+```
+
+## Basic Test Structure
+
+### First Test
+
+```typescript
+// e2e/home.spec.ts
+import { test, expect } from '@playwright/test';
+
+test.describe('Home Page', () => {
+  test('has correct title', async ({ page }) => {
+    await page.goto('/');
+    await expect(page).toHaveTitle(/My App/);
+  });
+
+  test('navigation links work', async ({ page }) => {
+    await page.goto('/');
+
+    await page.getByRole('link', { name: 'Products' }).click();
+    await expect(page).toHaveURL('/products');
+
+    await page.getByRole('link', { name: 'About' }).click();
+    await expect(page).toHaveURL('/about');
+  });
+
+  test('shows hero section', async ({ page }) => {
+    await page.goto('/');
+
+    await expect(page.getByRole('heading', { name: 'Welcome' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Get Started' })).toBeVisible();
+  });
+});
+```
+
+## Locator Strategies
+
+### Priority Order
+
+| Priority | Locator | Example |
+|----------|---------|---------|
+| 1 | Role | `page.getByRole('button', { name: 'Submit' })` |
+| 2 | Label | `page.getByLabel('Email')` |
+| 3 | Placeholder | `page.getByPlaceholder('Enter email')` |
+| 4 | Text | `page.getByText('Welcome')` |
+| 5 | Alt text | `page.getByAltText('Logo')` |
+| 6 | Title | `page.getByTitle('Close')` |
+| 7 | Test ID | `page.getByTestId('submit-btn')` |
+
+<Callout type="info">
+Playwright automatically waits for elements to be actionable before interacting. No manual waits needed in most cases.
+</Callout>
+
+### Locator Examples
+
+```typescript
+// Role-based (preferred)
+page.getByRole('button', { name: 'Submit' });
+page.getByRole('link', { name: /sign in/i });
+page.getByRole('heading', { level: 1 });
+page.getByRole('textbox', { name: 'Email' });
+page.getByRole('checkbox', { name: 'Remember me' });
+page.getByRole('combobox', { name: 'Country' });
+
+// Form elements
+page.getByLabel('Password');
+page.getByPlaceholder('Search...');
+
+// Text content
+page.getByText('Welcome back');
+page.getByText(/total: \$\d+/i);
+
+// Test IDs (last resort)
+page.getByTestId('user-avatar');
+
+// CSS selectors (avoid when possible)
+page.locator('.submit-button');
+page.locator('#email-input');
+
+// Chaining locators
+page.getByRole('listitem').filter({ hasText: 'Product A' });
+page.getByRole('row').nth(2).getByRole('button', { name: 'Edit' });
+```
+
+## Page Object Model
+
+### Creating Page Objects
+
+```typescript
+// e2e/pages/LoginPage.ts
+import { type Page, type Locator, expect } from '@playwright/test';
+
+export class LoginPage {
+  readonly page: Page;
+  readonly emailInput: Locator;
+  readonly passwordInput: Locator;
+  readonly submitButton: Locator;
+  readonly errorMessage: Locator;
+
+  constructor(page: Page) {
+    this.page = page;
+    this.emailInput = page.getByLabel('Email');
+    this.passwordInput = page.getByLabel('Password');
+    this.submitButton = page.getByRole('button', { name: 'Sign in' });
+    this.errorMessage = page.getByRole('alert');
+  }
+
+  async goto() {
+    await this.page.goto('/login');
+  }
+
+  async login(email: string, password: string) {
+    await this.emailInput.fill(email);
+    await this.passwordInput.fill(password);
+    await this.submitButton.click();
+  }
+
+  async expectError(message: string) {
+    await expect(this.errorMessage).toContainText(message);
+  }
+
+  async expectLoggedIn() {
+    await expect(this.page).toHaveURL('/dashboard');
+  }
+}
+
+// e2e/pages/DashboardPage.ts
+import { type Page, type Locator, expect } from '@playwright/test';
+
+export class DashboardPage {
+  readonly page: Page;
+  readonly welcomeMessage: Locator;
+  readonly logoutButton: Locator;
+  readonly userMenu: Locator;
+
+  constructor(page: Page) {
+    this.page = page;
+    this.welcomeMessage = page.getByRole('heading', { name: /welcome/i });
+    this.logoutButton = page.getByRole('button', { name: 'Logout' });
+    this.userMenu = page.getByRole('button', { name: 'User menu' });
+  }
+
+  async goto() {
+    await this.page.goto('/dashboard');
+  }
+
+  async logout() {
+    await this.userMenu.click();
+    await this.logoutButton.click();
+  }
+
+  async expectWelcomeMessage(name: string) {
+    await expect(this.welcomeMessage).toContainText(name);
+  }
+}
+```
+
+### Using Page Objects
+
+```typescript
+// e2e/auth.spec.ts
+import { test, expect } from '@playwright/test';
+import { LoginPage } from './pages/LoginPage';
+import { DashboardPage } from './pages/DashboardPage';
+
+test.describe('Authentication', () => {
+  test('successful login', async ({ page }) => {
+    const loginPage = new LoginPage(page);
+    const dashboardPage = new DashboardPage(page);
+
+    await loginPage.goto();
+    await loginPage.login('user@example.com', 'password123');
+    await loginPage.expectLoggedIn();
+    await dashboardPage.expectWelcomeMessage('John');
+  });
+
+  test('failed login shows error', async ({ page }) => {
+    const loginPage = new LoginPage(page);
+
+    await loginPage.goto();
+    await loginPage.login('wrong@example.com', 'wrongpassword');
+    await loginPage.expectError('Invalid credentials');
+  });
+
+  test('logout redirects to login', async ({ page }) => {
+    const loginPage = new LoginPage(page);
+    const dashboardPage = new DashboardPage(page);
+
+    // Login first
+    await loginPage.goto();
+    await loginPage.login('user@example.com', 'password123');
+
+    // Then logout
+    await dashboardPage.logout();
+    await expect(page).toHaveURL('/login');
+  });
+});
+```
+
+## Authentication State
+
+### Storing Authentication
+
+```typescript
+// e2e/auth.setup.ts
+import { test as setup, expect } from '@playwright/test';
+
+const authFile = 'playwright/.auth/user.json';
+
+setup('authenticate', async ({ page }) => {
+  await page.goto('/login');
+  await page.getByLabel('Email').fill('user@example.com');
+  await page.getByLabel('Password').fill('password123');
+  await page.getByRole('button', { name: 'Sign in' }).click();
+
+  await expect(page).toHaveURL('/dashboard');
+
+  await page.context().storageState({ path: authFile });
+});
+```
+
+### Configuration for Auth
+
+```typescript
+// playwright.config.ts
+import { defineConfig } from '@playwright/test';
+
+export default defineConfig({
+  projects: [
+    // Setup project
+    { name: 'setup', testMatch: /.*\.setup\.ts/ },
+
+    // Tests that need auth
+    {
+      name: 'chromium',
+      dependencies: ['setup'],
+      use: {
+        storageState: 'playwright/.auth/user.json',
+      },
+    },
+
+    // Tests that don't need auth
+    {
+      name: 'chromium-unauthenticated',
+      testMatch: /.*\.unauthenticated\.spec\.ts/,
+    },
+  ],
+});
+```
+
+## API Mocking
+
+### Intercepting Requests
+
+```typescript
+// e2e/products.spec.ts
+import { test, expect } from '@playwright/test';
+
+test.describe('Products', () => {
+  test('displays mocked products', async ({ page }) => {
+    // Mock the API response
+    await page.route('**/api/products', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([
+          { id: '1', name: 'Test Product', price: 99.99 },
+          { id: '2', name: 'Another Product', price: 149.99 },
+        ]),
+      });
+    });
+
+    await page.goto('/products');
+
+    await expect(page.getByText('Test Product')).toBeVisible();
+    await expect(page.getByText('$99.99')).toBeVisible();
+  });
+
+  test('handles API errors', async ({ page }) => {
+    await page.route('**/api/products', async (route) => {
+      await route.fulfill({
+        status: 500,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: 'Server error' }),
+      });
+    });
+
+    await page.goto('/products');
+
+    await expect(page.getByRole('alert')).toContainText('Failed to load products');
+  });
+
+  test('shows loading state', async ({ page }) => {
+    // Delay the response
+    await page.route('**/api/products', async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      await route.fulfill({
+        status: 200,
+        body: JSON.stringify([]),
+      });
+    });
+
+    await page.goto('/products');
+
+    await expect(page.getByRole('progressbar')).toBeVisible();
+  });
+});
+```
+
+### Modifying Requests
+
+```typescript
+test('adds auth header to requests', async ({ page }) => {
+  await page.route('**/api/**', async (route) => {
+    const headers = {
+      ...route.request().headers(),
+      'Authorization': 'Bearer test-token',
+    };
+    await route.continue({ headers });
+  });
+
+  await page.goto('/dashboard');
+});
+```
+
+## Visual Testing
+
+### Screenshot Comparison
+
+```typescript
+// e2e/visual.spec.ts
+import { test, expect } from '@playwright/test';
+
+test.describe('Visual Regression', () => {
+  test('homepage looks correct', async ({ page }) => {
+    await page.goto('/');
+    await expect(page).toHaveScreenshot('homepage.png');
+  });
+
+  test('login form looks correct', async ({ page }) => {
+    await page.goto('/login');
+    await expect(page.getByRole('form')).toHaveScreenshot('login-form.png');
+  });
+
+  test('product card looks correct', async ({ page }) => {
+    await page.goto('/products');
+    await expect(page.getByTestId('product-card').first()).toHaveScreenshot('product-card.png');
+  });
+});
+```
+
+### Screenshot Options
+
+```typescript
+test('full page screenshot', async ({ page }) => {
+  await page.goto('/');
+
+  await expect(page).toHaveScreenshot('full-page.png', {
+    fullPage: true,
+    animations: 'disabled',
+    mask: [page.locator('.dynamic-content')],
+  });
+});
+
+test('element screenshot with threshold', async ({ page }) => {
+  await page.goto('/');
+
+  await expect(page.getByRole('navigation')).toHaveScreenshot('nav.png', {
+    maxDiffPixels: 100,
+    maxDiffPixelRatio: 0.01,
+  });
+});
+```
+
+## Testing Forms
+
+```typescript
+// e2e/checkout.spec.ts
+import { test, expect } from '@playwright/test';
+
+test.describe('Checkout Form', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/checkout');
+  });
+
+  test('validates required fields', async ({ page }) => {
+    await page.getByRole('button', { name: 'Place order' }).click();
+
+    await expect(page.getByText('Name is required')).toBeVisible();
+    await expect(page.getByText('Address is required')).toBeVisible();
+    await expect(page.getByText('Card number is required')).toBeVisible();
+  });
+
+  test('fills and submits form', async ({ page }) => {
+    // Fill shipping info
+    await page.getByLabel('Full name').fill('John Doe');
+    await page.getByLabel('Address').fill('123 Main St');
+    await page.getByLabel('City').fill('San Francisco');
+    await page.getByLabel('State').selectOption('CA');
+    await page.getByLabel('ZIP code').fill('94102');
+
+    // Fill payment info
+    await page.getByLabel('Card number').fill('4242424242424242');
+    await page.getByLabel('Expiration').fill('12/25');
+    await page.getByLabel('CVC').fill('123');
+
+    // Submit
+    await page.getByRole('button', { name: 'Place order' }).click();
+
+    // Verify success
+    await expect(page.getByText('Order confirmed!')).toBeVisible();
+    await expect(page).toHaveURL(/\/order\/\w+/);
+  });
+
+  test('handles file upload', async ({ page }) => {
+    await page.goto('/upload');
+
+    const fileInput = page.getByLabel('Upload document');
+    await fileInput.setInputFiles('test-data/document.pdf');
+
+    await expect(page.getByText('document.pdf')).toBeVisible();
+  });
+});
+```
+
+## Testing Modals and Dialogs
+
+```typescript
+// e2e/dialogs.spec.ts
+import { test, expect } from '@playwright/test';
+
+test.describe('Dialogs', () => {
+  test('confirm dialog', async ({ page }) => {
+    await page.goto('/items');
+
+    // Set up dialog handler before triggering
+    page.on('dialog', async (dialog) => {
+      expect(dialog.type()).toBe('confirm');
+      expect(dialog.message()).toContain('Are you sure');
+      await dialog.accept();
+    });
+
+    await page.getByRole('button', { name: 'Delete' }).click();
+
+    await expect(page.getByText('Item deleted')).toBeVisible();
+  });
+
+  test('custom modal', async ({ page }) => {
+    await page.goto('/dashboard');
+
+    // Open modal
+    await page.getByRole('button', { name: 'Add item' }).click();
+
+    // Interact with modal content
+    const modal = page.getByRole('dialog');
+    await expect(modal).toBeVisible();
+
+    await modal.getByLabel('Item name').fill('New Item');
+    await modal.getByRole('button', { name: 'Save' }).click();
+
+    // Modal should close
+    await expect(modal).not.toBeVisible();
+  });
+});
+```
+
+## Mobile Testing
+
+```typescript
+// e2e/mobile.spec.ts
+import { test, expect, devices } from '@playwright/test';
+
+test.describe('Mobile Experience', () => {
+  test.use({ ...devices['iPhone 13'] });
+
+  test('mobile navigation works', async ({ page }) => {
+    await page.goto('/');
+
+    // Open mobile menu
+    await page.getByRole('button', { name: 'Menu' }).click();
+
+    // Navigation should be visible
+    await expect(page.getByRole('navigation')).toBeVisible();
+
+    // Navigate
+    await page.getByRole('link', { name: 'Products' }).click();
+    await expect(page).toHaveURL('/products');
+  });
+
+  test('touch gestures work', async ({ page }) => {
+    await page.goto('/gallery');
+
+    // Swipe to next image
+    const gallery = page.getByTestId('image-gallery');
+    await gallery.dragTo(gallery, {
+      sourcePosition: { x: 300, y: 200 },
+      targetPosition: { x: 50, y: 200 },
+    });
+
+    await expect(page.getByText('Image 2 of 10')).toBeVisible();
+  });
+});
+```
+
+## Performance Testing
+
+```typescript
+// e2e/performance.spec.ts
+import { test, expect } from '@playwright/test';
+
+test.describe('Performance', () => {
+  test('page loads within threshold', async ({ page }) => {
+    const startTime = Date.now();
+
+    await page.goto('/');
+    await page.waitForLoadState('networkidle');
+
+    const loadTime = Date.now() - startTime;
+    expect(loadTime).toBeLessThan(3000);
+  });
+
+  test('measures Core Web Vitals', async ({ page }) => {
+    await page.goto('/');
+
+    const metrics = await page.evaluate(() => {
+      return new Promise((resolve) => {
+        new PerformanceObserver((list) => {
+          const entries = list.getEntries();
+          resolve({
+            lcp: entries.find((e) => e.entryType === 'largest-contentful-paint'),
+            fid: entries.find((e) => e.entryType === 'first-input'),
+            cls: entries.find((e) => e.entryType === 'layout-shift'),
+          });
+        }).observe({ entryTypes: ['largest-contentful-paint', 'first-input', 'layout-shift'] });
+
+        // Trigger measurement
+        setTimeout(resolve, 5000);
+      });
+    });
+
+    console.log('Performance metrics:', metrics);
+  });
+});
+```
+
+## Debugging
+
+### Debug Mode
+
+```bash
+# Run with headed browser
+npx playwright test --headed
+
+# Debug mode with Playwright Inspector
+npx playwright test --debug
+
+# UI mode for interactive debugging
+npx playwright test --ui
+```
+
+### Tracing
+
+```typescript
+// playwright.config.ts
+export default defineConfig({
+  use: {
+    trace: 'on-first-retry', // or 'on', 'off', 'retain-on-failure'
+  },
+});
+```
+
+```bash
+# View trace
+npx playwright show-trace trace.zip
+```
+
+### Console Logging
+
+```typescript
+test('debug with console', async ({ page }) => {
+  page.on('console', (msg) => console.log('Browser console:', msg.text()));
+
+  await page.goto('/');
+
+  // Pause test for manual debugging
+  await page.pause();
+});
+```
+
+## CI Integration
+
+### GitHub Actions
+
+```yaml
+# .github/workflows/e2e.yml
+name: E2E Tests
+
+on: [push, pull_request]
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps
+
+      - name: Run E2E tests
+        run: npx playwright test
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 30
+```
+
+## Pros and Cons
+
+| Pros | Cons |
+|------|------|
+| Cross-browser testing | Slowest test type |
+| Real browser environment | Requires more infrastructure |
+| Auto-waiting reduces flakiness | Can be flaky without care |
+| Powerful debugging tools | Higher maintenance cost |
+| Visual testing support | Longer feedback loop |
+| Mobile device emulation | More complex setup |
+
+## When to Use
+
+Use Playwright E2E tests for:
+- Critical user journeys (auth, checkout, signup)
+- Cross-browser compatibility verification
+- Visual regression testing
+- Performance monitoring
+- Smoke tests before deployment
+- Integration with external services
+
+## When NOT to Use
+
+Do not use E2E tests for:
+- Testing individual component behavior
+- Testing business logic in isolation
+- Testing edge cases (use unit/integration tests)
+- Rapid development feedback
+- Testing internal implementation details
+
+<Callout type="warn">
+E2E tests should cover the most critical paths only. Over-testing with E2E leads to slow CI pipelines and high maintenance costs.
+</Callout>
+
+## Best Practices Summary
+
+| Practice | Description |
+|----------|-------------|
+| Use Page Object Model | Encapsulate page interactions |
+| Prefer role-based locators | More resilient to changes |
+| Store auth state | Speed up authenticated tests |
+| Mock external services | Control test environment |
+| Run in CI | Catch regressions early |
+| Keep tests focused | One scenario per test |
+| Use auto-waiting | Avoid manual sleeps |
+| Generate traces | Debug failing tests effectively |

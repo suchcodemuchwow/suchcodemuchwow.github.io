@@ -1,0 +1,500 @@
+---
+title: ARIA Patterns
+description: Implement ARIA roles, states, and properties correctly in React to enhance accessibility for dynamic interfaces.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## The First Rule of ARIA
+
+<Callout type="warn">
+No ARIA is better than bad ARIA. Use native HTML elements first. Only add ARIA when HTML cannot express the semantics.
+</Callout>
+
+## ARIA Roles
+
+Roles define what an element is or does.
+
+### Widget Roles
+
+| Role | Purpose | Native Alternative |
+|------|---------|-------------------|
+| `button` | Clickable action | `<button>` |
+| `link` | Navigation | `<a href>` |
+| `checkbox` | Toggle option | `<input type="checkbox">` |
+| `radio` | Single selection | `<input type="radio">` |
+| `tab` | Tab in tablist | None |
+| `tabpanel` | Content for tab | None |
+| `dialog` | Modal dialog | `<dialog>` |
+| `alertdialog` | Alert requiring response | None |
+| `menu` | Menu of actions | None |
+| `menuitem` | Item in menu | None |
+
+```tsx
+// Custom tab implementation (no native element)
+function Tabs() {
+  const [activeTab, setActiveTab] = useState(0);
+  const tabs = ['Overview', 'Features', 'Pricing'];
+
+  return (
+    <div>
+      <div role="tablist" aria-label="Product information">
+        {tabs.map((tab, index) => (
+          <button
+            key={tab}
+            role="tab"
+            id={`tab-${index}`}
+            aria-selected={activeTab === index}
+            aria-controls={`panel-${index}`}
+            tabIndex={activeTab === index ? 0 : -1}
+            onClick={() => setActiveTab(index)}
+          >
+            {tab}
+          </button>
+        ))}
+      </div>
+
+      {tabs.map((tab, index) => (
+        <div
+          key={tab}
+          role="tabpanel"
+          id={`panel-${index}`}
+          aria-labelledby={`tab-${index}`}
+          hidden={activeTab !== index}
+        >
+          Content for {tab}
+        </div>
+      ))}
+    </div>
+  );
+}
+```
+
+### Landmark Roles
+
+Use HTML elements instead when possible.
+
+| Role | HTML Element |
+|------|--------------|
+| `banner` | `<header>` |
+| `navigation` | `<nav>` |
+| `main` | `<main>` |
+| `complementary` | `<aside>` |
+| `contentinfo` | `<footer>` |
+| `region` | `<section>` with label |
+
+## ARIA States
+
+States communicate dynamic conditions to assistive technologies.
+
+### Common States
+
+| State | Values | Use Case |
+|-------|--------|----------|
+| `aria-expanded` | `true` / `false` | Collapsible sections |
+| `aria-selected` | `true` / `false` | Tabs, listbox options |
+| `aria-checked` | `true` / `false` / `mixed` | Checkboxes |
+| `aria-pressed` | `true` / `false` | Toggle buttons |
+| `aria-disabled` | `true` / `false` | Disabled controls |
+| `aria-hidden` | `true` / `false` | Hide from AT |
+| `aria-busy` | `true` / `false` | Loading state |
+| `aria-current` | `page` / `step` / `true` | Current item |
+
+```tsx
+// Accordion with expanded state
+function Accordion() {
+  const [expanded, setExpanded] = useState<string | null>(null);
+
+  const sections = [
+    { id: 'faq-1', title: 'How do I...', content: 'You can...' },
+    { id: 'faq-2', title: 'What is...', content: 'It is...' },
+  ];
+
+  return (
+    <div>
+      {sections.map((section) => (
+        <div key={section.id}>
+          <h3>
+            <button
+              type="button"
+              aria-expanded={expanded === section.id}
+              aria-controls={`content-${section.id}`}
+              onClick={() => setExpanded(
+                expanded === section.id ? null : section.id
+              )}
+            >
+              {section.title}
+            </button>
+          </h3>
+          <div
+            id={`content-${section.id}`}
+            hidden={expanded !== section.id}
+          >
+            {section.content}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+```
+
+```tsx
+// Toggle button with pressed state
+function ToggleButton() {
+  const [pressed, setPressed] = useState(false);
+
+  return (
+    <button
+      type="button"
+      aria-pressed={pressed}
+      onClick={() => setPressed(!pressed)}
+    >
+      {pressed ? 'Mute' : 'Unmute'}
+    </button>
+  );
+}
+```
+
+```tsx
+// Navigation with current page
+function Navigation({ currentPath }: { currentPath: string }) {
+  const links = [
+    { href: '/', label: 'Home' },
+    { href: '/products', label: 'Products' },
+    { href: '/about', label: 'About' },
+  ];
+
+  return (
+    <nav>
+      <ul>
+        {links.map((link) => (
+          <li key={link.href}>
+            <a
+              href={link.href}
+              aria-current={currentPath === link.href ? 'page' : undefined}
+            >
+              {link.label}
+            </a>
+          </li>
+        ))}
+      </ul>
+    </nav>
+  );
+}
+```
+
+## ARIA Properties
+
+Properties provide additional information about elements.
+
+### Labeling
+
+| Property | Purpose |
+|----------|---------|
+| `aria-label` | Text label when no visible label |
+| `aria-labelledby` | References visible label element |
+| `aria-describedby` | References description element |
+
+```tsx
+// Icon button needs label
+function IconButton() {
+  return (
+    <button type="button" aria-label="Close dialog">
+      <svg aria-hidden="true">{/* X icon */}</svg>
+    </button>
+  );
+}
+
+// Form with descriptions
+function FormField() {
+  return (
+    <div>
+      <label id="email-label" htmlFor="email">
+        Email
+      </label>
+      <input
+        id="email"
+        type="email"
+        aria-labelledby="email-label"
+        aria-describedby="email-hint email-error"
+      />
+      <p id="email-hint">We'll never share your email.</p>
+      <p id="email-error" role="alert">
+        Please enter a valid email.
+      </p>
+    </div>
+  );
+}
+```
+
+### Relationships
+
+| Property | Purpose |
+|----------|---------|
+| `aria-controls` | Element this controls |
+| `aria-owns` | Elements owned (DOM order differs) |
+| `aria-haspopup` | Has popup (menu, dialog, etc.) |
+
+```tsx
+// Dropdown menu
+function Dropdown() {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div>
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-haspopup="menu"
+        aria-controls="dropdown-menu"
+        onClick={() => setOpen(!open)}
+      >
+        Options
+      </button>
+
+      {open && (
+        <ul id="dropdown-menu" role="menu">
+          <li role="menuitem">Edit</li>
+          <li role="menuitem">Delete</li>
+        </ul>
+      )}
+    </div>
+  );
+}
+```
+
+## Live Regions
+
+Live regions announce dynamic content changes to screen readers.
+
+### Politeness Levels
+
+| Value | Behavior |
+|-------|----------|
+| `off` | No announcements |
+| `polite` | Announces when idle |
+| `assertive` | Interrupts immediately |
+
+```tsx
+// Status message (polite)
+function StatusMessage({ message }: { message: string }) {
+  return (
+    <div aria-live="polite" aria-atomic="true">
+      {message}
+    </div>
+  );
+}
+
+// Error alert (assertive)
+function ErrorAlert({ error }: { error: string | null }) {
+  return (
+    <div role="alert" aria-live="assertive">
+      {error}
+    </div>
+  );
+}
+```
+
+### Live Region Properties
+
+| Property | Values | Purpose |
+|----------|--------|---------|
+| `aria-live` | `off`, `polite`, `assertive` | Politeness |
+| `aria-atomic` | `true`, `false` | Announce whole region |
+| `aria-relevant` | `additions`, `removals`, `text`, `all` | What changes to announce |
+
+```tsx
+// Loading indicator
+function LoadingState({ loading }: { loading: boolean }) {
+  return (
+    <div
+      aria-live="polite"
+      aria-busy={loading}
+    >
+      {loading ? 'Loading...' : 'Content loaded'}
+    </div>
+  );
+}
+
+// Toast notifications
+function ToastContainer({ toasts }: { toasts: string[] }) {
+  return (
+    <div
+      aria-live="polite"
+      aria-relevant="additions"
+    >
+      {toasts.map((toast, i) => (
+        <div key={i} role="status">
+          {toast}
+        </div>
+      ))}
+    </div>
+  );
+}
+```
+
+<Callout type="info">
+Live regions must exist in the DOM before content changes. Don't conditionally render the container.
+</Callout>
+
+## When NOT to Use ARIA
+
+### Use Native HTML Instead
+
+```tsx
+// Bad - ARIA on div
+<div role="button" tabIndex={0} onClick={handleClick}>
+  Click me
+</div>
+
+// Good - native button
+<button type="button" onClick={handleClick}>
+  Click me
+</button>
+```
+
+```tsx
+// Bad - ARIA checkbox
+<div
+  role="checkbox"
+  aria-checked={checked}
+  tabIndex={0}
+  onClick={() => setChecked(!checked)}
+>
+  Accept terms
+</div>
+
+// Good - native checkbox
+<label>
+  <input
+    type="checkbox"
+    checked={checked}
+    onChange={(e) => setChecked(e.target.checked)}
+  />
+  Accept terms
+</label>
+```
+
+### Don't Override Native Semantics
+
+```tsx
+// Bad - overriding native semantics
+<button role="link">Click here</button>
+
+// Good - use the right element
+<a href="/page">Click here</a>
+```
+
+## Common ARIA Mistakes
+
+| Mistake | Problem | Fix |
+|---------|---------|-----|
+| `role="button"` on div | Missing keyboard support | Use `<button>` |
+| `aria-label` on div | Not announced | Add role or use semantic element |
+| `aria-hidden="true"` on focusable | Focus goes to hidden element | Remove from tab order too |
+| Missing `aria-expanded` | State change not announced | Add state attribute |
+| `aria-live` on everything | Too many announcements | Use sparingly |
+
+```tsx
+// Mistake: aria-hidden but still focusable
+<div aria-hidden="true">
+  <button>Still focusable!</button>  {/* Bug! */}
+</div>
+
+// Fix: also prevent focus
+<div aria-hidden="true" inert>
+  <button tabIndex={-1}>Not focusable</button>
+</div>
+```
+
+## React and Dynamic ARIA
+
+### Conditional ARIA Values
+
+```tsx
+// Use undefined to remove attribute entirely
+function ConditionalAria({ isSelected }: { isSelected: boolean }) {
+  return (
+    <div
+      role="option"
+      aria-selected={isSelected ? true : undefined}
+    >
+      Option
+    </div>
+  );
+}
+```
+
+### ARIA with State Updates
+
+```tsx
+function DynamicAria() {
+  const [expanded, setExpanded] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const contentId = useId();
+
+  const handleToggle = async () => {
+    setLoading(true);
+    setExpanded(!expanded);
+    // Simulate async operation
+    await new Promise((r) => setTimeout(r, 500));
+    setLoading(false);
+  };
+
+  return (
+    <div>
+      <button
+        type="button"
+        aria-expanded={expanded}
+        aria-controls={contentId}
+        aria-busy={loading}
+        onClick={handleToggle}
+      >
+        Toggle Content
+      </button>
+
+      <div id={contentId} hidden={!expanded}>
+        {loading ? 'Loading...' : 'Expanded content'}
+      </div>
+    </div>
+  );
+}
+```
+
+### Generate Unique IDs
+
+```tsx
+import { useId } from 'react';
+
+function AccessibleInput({ label }: { label: string }) {
+  const id = useId();
+  const descriptionId = useId();
+
+  return (
+    <div>
+      <label htmlFor={id}>{label}</label>
+      <input
+        id={id}
+        aria-describedby={descriptionId}
+      />
+      <p id={descriptionId}>Helper text</p>
+    </div>
+  );
+}
+```
+
+## Quick Reference
+
+### Must Have
+
+- `aria-label` or `aria-labelledby` for unlabeled interactive elements
+- `aria-expanded` for collapsible elements
+- `aria-selected` for selectable items (tabs, options)
+- `aria-current` for current page/step indicators
+
+### Use Sparingly
+
+- `aria-live` (causes announcements)
+- `role` overrides (prefer native elements)
+- `aria-hidden` (ensure no focusable children)

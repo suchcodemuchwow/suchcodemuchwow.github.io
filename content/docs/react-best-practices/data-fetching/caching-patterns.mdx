@@ -1,0 +1,646 @@
+---
+title: Caching Patterns
+description: Manual caching strategies for data fetching in React without external libraries
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## Overview
+
+Caching reduces unnecessary network requests, improves performance, and provides a better user experience. These patterns show how to implement caching manually using React primitives.
+
+## Simple Cache with useRef
+
+Use `useRef` to persist cache across renders without triggering re-renders.
+
+```tsx
+import { useState, useEffect, useRef } from 'react';
+
+interface User {
+  id: number;
+  name: string;
+  email: string;
+}
+
+function useUserWithCache(userId: number) {
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
+  const cacheRef = useRef<Record<number, User>>({});
+
+  useEffect(() => {
+    // Check cache first
+    if (cacheRef.current[userId]) {
+      setUser(cacheRef.current[userId]);
+      setLoading(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    setLoading(true);
+
+    fetch(`/api/users/${userId}`, { signal: controller.signal })
+      .then(res => res.json())
+      .then(data => {
+        // Store in cache
+        cacheRef.current[userId] = data;
+        setUser(data);
+        setLoading(false);
+      })
+      .catch(err => {
+        if (err.name !== 'AbortError') {
+          setLoading(false);
+        }
+      });
+
+    return () => controller.abort();
+  }, [userId]);
+
+  return { user, loading };
+}
+```
+
+<Callout type="info">
+useRef cache persists for the component's lifetime. When the component unmounts, the cache is lost.
+</Callout>
+
+## Cache with Map
+
+Use a `Map` for more control over cache entries and better performance with many items.
+
+```tsx
+import { useState, useEffect, useRef, useCallback } from 'react';
+
+interface CacheEntry<T> {
+  data: T;
+  timestamp: number;
+}
+
+function useCachedFetch<T>(
+  url: string,
+  ttl: number = 5 * 60 * 1000 // 5 minutes default
+) {
+  const [data, setData] = useState<T | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+  const cacheRef = useRef<Map<string, CacheEntry<T>>>(new Map());
+
+  const fetchData = useCallback(async () => {
+    const cached = cacheRef.current.get(url);
+    const now = Date.now();
+
+    // Return cached data if still valid
+    if (cached && now - cached.timestamp < ttl) {
+      setData(cached.data);
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+      const result: T = await response.json();
+
+      // Update cache
+      cacheRef.current.set(url, {
+        data: result,
+        timestamp: now
+      });
+
+      setData(result);
+    } catch (e) {
+      setError(e instanceof Error ? e : new Error('Unknown error'));
+    } finally {
+      setLoading(false);
+    }
+  }, [url, ttl]);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  const invalidate = useCallback(() => {
+    cacheRef.current.delete(url);
+    fetchData();
+  }, [url, fetchData]);
+
+  return { data, loading, error, invalidate };
+}
+```
+
+### Map vs Object for Cache
+
+| Feature | Map | Object |
+|---------|-----|--------|
+| Key types | Any type | String/Symbol only |
+| Size tracking | `map.size` | Manual counting |
+| Iteration | Maintains insertion order | No guaranteed order |
+| Performance | Better for frequent add/delete | Better for static data |
+| Serialization | Requires custom | JSON.stringify works |
+
+## Cache Invalidation
+
+### Time-based Invalidation
+
+```tsx
+import { useRef, useCallback } from 'react';
+
+interface CacheEntry<T> {
+  data: T;
+  expiresAt: number;
+}
+
+function createCache<T>(defaultTtl: number = 60000) {
+  const cache = new Map<string, CacheEntry<T>>();
+
+  return {
+    get(key: string): T | null {
+      const entry = cache.get(key);
+      if (!entry) return null;
+
+      if (Date.now() > entry.expiresAt) {
+        cache.delete(key);
+        return null;
+      }
+
+      return entry.data;
+    },
+
+    set(key: string, data: T, ttl: number = defaultTtl): void {
+      cache.set(key, {
+        data,
+        expiresAt: Date.now() + ttl
+      });
+    },
+
+    invalidate(key: string): void {
+      cache.delete(key);
+    },
+
+    invalidateAll(): void {
+      cache.clear();
+    },
+
+    invalidatePattern(pattern: RegExp): void {
+      for (const key of cache.keys()) {
+        if (pattern.test(key)) {
+          cache.delete(key);
+        }
+      }
+    }
+  };
+}
+
+// Usage
+const userCache = createCache<User>(5 * 60 * 1000); // 5 minute TTL
+
+function useUser(userId: number) {
+  const [user, setUser] = useState<User | null>(null);
+
+  useEffect(() => {
+    const cacheKey = `user-${userId}`;
+    const cached = userCache.get(cacheKey);
+
+    if (cached) {
+      setUser(cached);
+      return;
+    }
+
+    fetch(`/api/users/${userId}`)
+      .then(res => res.json())
+      .then(data => {
+        userCache.set(cacheKey, data);
+        setUser(data);
+      });
+  }, [userId]);
+
+  return user;
+}
+```
+
+### Event-based Invalidation
+
+```tsx
+import { useEffect, useState, useCallback } from 'react';
+
+// Simple event emitter for cache invalidation
+const cacheEvents = {
+  listeners: new Map<string, Set<() => void>>(),
+
+  subscribe(key: string, callback: () => void) {
+    if (!this.listeners.has(key)) {
+      this.listeners.set(key, new Set());
+    }
+    this.listeners.get(key)!.add(callback);
+
+    return () => {
+      this.listeners.get(key)?.delete(callback);
+    };
+  },
+
+  invalidate(key: string) {
+    this.listeners.get(key)?.forEach(callback => callback());
+  }
+};
+
+function useCachedUser(userId: number) {
+  const [user, setUser] = useState<User | null>(null);
+  const [version, setVersion] = useState(0);
+
+  // Subscribe to invalidation events
+  useEffect(() => {
+    return cacheEvents.subscribe(`user-${userId}`, () => {
+      setVersion(v => v + 1);
+    });
+  }, [userId]);
+
+  useEffect(() => {
+    fetch(`/api/users/${userId}`)
+      .then(res => res.json())
+      .then(setUser);
+  }, [userId, version]);
+
+  return user;
+}
+
+// Invalidate after mutation
+async function updateUser(userId: number, data: Partial<User>) {
+  await fetch(`/api/users/${userId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(data)
+  });
+
+  // Trigger re-fetch for all components using this user
+  cacheEvents.invalidate(`user-${userId}`);
+}
+```
+
+## Stale-While-Revalidate (Manual)
+
+Return cached data immediately while fetching fresh data in the background.
+
+```tsx
+import { useState, useEffect, useRef, useCallback } from 'react';
+
+interface SWRState<T> {
+  data: T | null;
+  isValidating: boolean;
+  isStale: boolean;
+  error: Error | null;
+}
+
+function useStaleWhileRevalidate<T>(
+  url: string,
+  options: { ttl?: number; staleTime?: number } = {}
+) {
+  const { ttl = 5 * 60 * 1000, staleTime = 30 * 1000 } = options;
+
+  const [state, setState] = useState<SWRState<T>>({
+    data: null,
+    isValidating: true,
+    isStale: false,
+    error: null
+  });
+
+  const cacheRef = useRef<Map<string, { data: T; timestamp: number }>>(new Map());
+
+  const fetchData = useCallback(async (showLoading: boolean) => {
+    if (showLoading) {
+      setState(prev => ({ ...prev, isValidating: true }));
+    }
+
+    try {
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+      const data: T = await response.json();
+
+      cacheRef.current.set(url, {
+        data,
+        timestamp: Date.now()
+      });
+
+      setState({
+        data,
+        isValidating: false,
+        isStale: false,
+        error: null
+      });
+    } catch (e) {
+      setState(prev => ({
+        ...prev,
+        isValidating: false,
+        error: e instanceof Error ? e : new Error('Unknown')
+      }));
+    }
+  }, [url]);
+
+  useEffect(() => {
+    const cached = cacheRef.current.get(url);
+    const now = Date.now();
+
+    if (cached) {
+      const age = now - cached.timestamp;
+
+      // Data is fresh - use it
+      if (age < staleTime) {
+        setState({
+          data: cached.data,
+          isValidating: false,
+          isStale: false,
+          error: null
+        });
+        return;
+      }
+
+      // Data is stale but within TTL - show it and revalidate
+      if (age < ttl) {
+        setState({
+          data: cached.data,
+          isValidating: true,
+          isStale: true,
+          error: null
+        });
+        fetchData(false); // Background revalidation
+        return;
+      }
+    }
+
+    // No cache or expired - fetch with loading state
+    fetchData(true);
+  }, [url, ttl, staleTime, fetchData]);
+
+  const mutate = useCallback((newData?: T) => {
+    if (newData) {
+      cacheRef.current.set(url, {
+        data: newData,
+        timestamp: Date.now()
+      });
+      setState(prev => ({ ...prev, data: newData, isStale: false }));
+    } else {
+      fetchData(false);
+    }
+  }, [url, fetchData]);
+
+  return { ...state, mutate };
+}
+
+// Usage
+function UserProfile({ userId }: { userId: number }) {
+  const { data: user, isValidating, isStale } = useStaleWhileRevalidate<User>(
+    `/api/users/${userId}`,
+    { staleTime: 30000, ttl: 300000 }
+  );
+
+  return (
+    <div>
+      {isStale && <span className="stale-indicator">Updating...</span>}
+      {user?.name}
+      {isValidating && !user && <div>Loading...</div>}
+    </div>
+  );
+}
+```
+
+<Callout type="info">
+Stale-while-revalidate provides instant UI updates from cache while ensuring data freshness through background refetching.
+</Callout>
+
+## Cache Key Strategies
+
+### Simple String Keys
+
+```tsx
+// Basic URL-based key
+const key = `/api/users/${userId}`;
+
+// With query parameters
+const key = `/api/users?page=${page}&limit=${limit}`;
+```
+
+### Structured Keys
+
+```tsx
+interface CacheKey {
+  resource: string;
+  id?: string | number;
+  params?: Record<string, unknown>;
+}
+
+function createCacheKey(key: CacheKey): string {
+  const base = key.id ? `${key.resource}/${key.id}` : key.resource;
+
+  if (key.params) {
+    const params = new URLSearchParams();
+    Object.entries(key.params).forEach(([k, v]) => {
+      params.set(k, String(v));
+    });
+    return `${base}?${params.toString()}`;
+  }
+
+  return base;
+}
+
+// Usage
+const key = createCacheKey({
+  resource: 'users',
+  id: 123,
+  params: { include: 'posts', fields: 'name,email' }
+});
+// Result: "users/123?include=posts&fields=name%2Cemail"
+```
+
+### Hierarchical Invalidation
+
+```tsx
+const cache = new Map<string, unknown>();
+
+function invalidateByPrefix(prefix: string): void {
+  for (const key of cache.keys()) {
+    if (key.startsWith(prefix)) {
+      cache.delete(key);
+    }
+  }
+}
+
+// Examples
+invalidateByPrefix('users/'); // Invalidate all user data
+invalidateByPrefix('users/123'); // Invalidate user 123 and related
+invalidateByPrefix('posts/'); // Invalidate all posts
+```
+
+## Memory Management
+
+### LRU Cache (Least Recently Used)
+
+```tsx
+class LRUCache<T> {
+  private cache = new Map<string, T>();
+  private maxSize: number;
+
+  constructor(maxSize: number = 100) {
+    this.maxSize = maxSize;
+  }
+
+  get(key: string): T | undefined {
+    const value = this.cache.get(key);
+
+    if (value !== undefined) {
+      // Move to end (most recently used)
+      this.cache.delete(key);
+      this.cache.set(key, value);
+    }
+
+    return value;
+  }
+
+  set(key: string, value: T): void {
+    // Delete if exists to update position
+    if (this.cache.has(key)) {
+      this.cache.delete(key);
+    }
+
+    this.cache.set(key, value);
+
+    // Remove oldest if over capacity
+    if (this.cache.size > this.maxSize) {
+      const firstKey = this.cache.keys().next().value;
+      if (firstKey) {
+        this.cache.delete(firstKey);
+      }
+    }
+  }
+
+  delete(key: string): boolean {
+    return this.cache.delete(key);
+  }
+
+  clear(): void {
+    this.cache.clear();
+  }
+
+  get size(): number {
+    return this.cache.size;
+  }
+}
+
+// Usage with React
+const globalCache = new LRUCache<unknown>(50);
+
+function useCachedData<T>(key: string, fetcher: () => Promise<T>) {
+  const [data, setData] = useState<T | null>(() => {
+    return (globalCache.get(key) as T) ?? null;
+  });
+
+  useEffect(() => {
+    if (!globalCache.get(key)) {
+      fetcher().then(result => {
+        globalCache.set(key, result);
+        setData(result);
+      });
+    }
+  }, [key, fetcher]);
+
+  return data;
+}
+```
+
+### Cache Size Limits
+
+```tsx
+interface CacheOptions {
+  maxEntries?: number;
+  maxAge?: number;
+  onEvict?: (key: string, value: unknown) => void;
+}
+
+function createBoundedCache<T>(options: CacheOptions = {}) {
+  const { maxEntries = 100, maxAge = 5 * 60 * 1000, onEvict } = options;
+
+  const cache = new Map<string, { data: T; timestamp: number }>();
+
+  function cleanup() {
+    const now = Date.now();
+
+    // Remove expired entries
+    for (const [key, entry] of cache) {
+      if (now - entry.timestamp > maxAge) {
+        cache.delete(key);
+        onEvict?.(key, entry.data);
+      }
+    }
+
+    // Remove oldest if still over limit
+    while (cache.size > maxEntries) {
+      const firstKey = cache.keys().next().value;
+      if (firstKey) {
+        const entry = cache.get(firstKey);
+        cache.delete(firstKey);
+        onEvict?.(firstKey, entry?.data);
+      }
+    }
+  }
+
+  return {
+    get(key: string): T | null {
+      const entry = cache.get(key);
+      if (!entry) return null;
+
+      if (Date.now() - entry.timestamp > maxAge) {
+        cache.delete(key);
+        return null;
+      }
+
+      return entry.data;
+    },
+
+    set(key: string, data: T): void {
+      cache.set(key, { data, timestamp: Date.now() });
+      cleanup();
+    },
+
+    clear(): void {
+      cache.clear();
+    }
+  };
+}
+```
+
+<Callout type="warn">
+Without size limits, caches can grow unbounded and cause memory issues. Always implement max size or TTL-based eviction.
+</Callout>
+
+## When to Use External Library Instead
+
+Manual caching is suitable for simple cases. Consider a library when you need:
+
+| Need | Manual Caching | Library |
+|------|----------------|---------|
+| Simple single-component cache | Sufficient | Overkill |
+| Shared cache across components | Complex | Built-in |
+| Automatic background refetching | Manual | Built-in |
+| Request deduplication | Complex | Built-in |
+| Optimistic updates | Manual | Built-in |
+| Offline support | Very complex | Often included |
+| DevTools | None | Available |
+| Window focus refetching | Manual | Built-in |
+
+### Signs You Need a Library
+
+- Multiple components need the same cached data
+- Complex invalidation logic across the app
+- Need optimistic updates for mutations
+- Require background sync or offline support
+- Team struggles with cache consistency bugs
+- Spending too much time on caching infrastructure
+
+### When Manual is Fine
+
+- Single component with isolated data needs
+- Simple read-only data display
+- Prototypes or MVPs
+- Learning purposes
+- Minimal caching requirements

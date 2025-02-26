@@ -1,0 +1,606 @@
+---
+title: Common Mistakes
+description: Frequent React mistakes and how to fix them
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## Mutating State Directly
+
+### Problem
+
+```tsx
+const [user, setUser] = useState({ name: 'John', age: 25 });
+
+// Wrong: mutating state directly
+const updateAge = () => {
+  user.age = 26;
+  setUser(user);
+};
+```
+
+### Why It's Wrong
+
+React uses reference equality to detect changes. Mutating the existing object keeps the same reference, so React doesn't recognize the change and won't re-render.
+
+### Solution
+
+```tsx
+const [user, setUser] = useState({ name: 'John', age: 25 });
+
+// Correct: create a new object
+const updateAge = () => {
+  setUser({ ...user, age: 26 });
+};
+
+// Or with functional update
+const updateAge = () => {
+  setUser(prev => ({ ...prev, age: 26 }));
+};
+```
+
+---
+
+## Missing Keys in Lists
+
+### Problem
+
+```tsx
+const TodoList = ({ todos }: { todos: string[] }) => {
+  return (
+    <ul>
+      {todos.map((todo) => (
+        <li>{todo}</li> // Missing key
+      ))}
+    </ul>
+  );
+};
+```
+
+### Why It's Wrong
+
+Without keys, React cannot efficiently track which items changed, were added, or removed. This leads to incorrect UI updates and poor performance.
+
+### Solution
+
+```tsx
+const TodoList = ({ todos }: { todos: { id: string; text: string }[] }) => {
+  return (
+    <ul>
+      {todos.map((todo) => (
+        <li key={todo.id}>{todo.text}</li>
+      ))}
+    </ul>
+  );
+};
+```
+
+<Callout type="warn">
+Never use array index as key for dynamic lists. Use stable, unique identifiers.
+</Callout>
+
+---
+
+## useEffect for Derived State
+
+### Problem
+
+```tsx
+const [items, setItems] = useState<string[]>([]);
+const [count, setCount] = useState(0);
+
+useEffect(() => {
+  setCount(items.length);
+}, [items]);
+```
+
+### Why It's Wrong
+
+This causes an unnecessary render cycle. Derived values should be calculated during render, not synchronized via effects.
+
+### Solution
+
+```tsx
+const [items, setItems] = useState<string[]>([]);
+
+// Derive directly during render
+const count = items.length;
+
+// Or use useMemo for expensive calculations
+const expensiveCount = useMemo(() => {
+  return items.filter(item => item.length > 5).length;
+}, [items]);
+```
+
+---
+
+## Over-Fetching in Effects
+
+### Problem
+
+```tsx
+const UserProfile = ({ userId }: { userId: string }) => {
+  const [user, setUser] = useState<User | null>(null);
+
+  useEffect(() => {
+    fetch(`/api/users/${userId}`)
+      .then(res => res.json())
+      .then(setUser);
+  }, [userId]);
+
+  // No cleanup, no loading state, no error handling
+  return <div>{user?.name}</div>;
+};
+```
+
+### Why It's Wrong
+
+- No cleanup leads to race conditions when userId changes rapidly
+- No loading/error states lead to poor UX
+- Stale data can overwrite fresh data
+
+### Solution
+
+```tsx
+const UserProfile = ({ userId }: { userId: string }) => {
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+
+    fetch(`/api/users/${userId}`)
+      .then(res => {
+        if (!res.ok) throw new Error('Failed to fetch');
+        return res.json();
+      })
+      .then(data => {
+        if (!cancelled) {
+          setUser(data);
+          setLoading(false);
+        }
+      })
+      .catch(err => {
+        if (!cancelled) {
+          setError(err);
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
+
+  if (loading) return <div>Loading...</div>;
+  if (error) return <div>Error: {error.message}</div>;
+  return <div>{user?.name}</div>;
+};
+```
+
+---
+
+## Prop Drilling Fear (Premature Context)
+
+### Problem
+
+```tsx
+// Creating context for data that only goes 2 levels deep
+const UserContext = createContext<User | null>(null);
+
+const App = () => {
+  const [user, setUser] = useState<User | null>(null);
+  return (
+    <UserContext.Provider value={user}>
+      <Header />
+    </UserContext.Provider>
+  );
+};
+
+const Header = () => {
+  const user = useContext(UserContext);
+  return <div>{user?.name}</div>;
+};
+```
+
+### Why It's Wrong
+
+Context adds complexity and can cause unnecessary re-renders. For shallow prop passing (2-3 levels), props are simpler and more explicit.
+
+| Approach | Pros | Cons |
+|----------|------|------|
+| Props | Explicit, traceable, type-safe | Verbose for deep trees |
+| Context | Avoids drilling | Hidden dependencies, re-render issues |
+
+### Solution
+
+```tsx
+// Just use props for shallow hierarchies
+const App = () => {
+  const [user, setUser] = useState<User | null>(null);
+  return <Header user={user} />;
+};
+
+const Header = ({ user }: { user: User | null }) => {
+  return <div>{user?.name}</div>;
+};
+```
+
+<Callout type="info">
+Use Context for truly global state (theme, auth, locale) or when drilling exceeds 3-4 levels.
+</Callout>
+
+---
+
+## Over-Optimization
+
+### Problem
+
+```tsx
+const List = ({ items }: { items: string[] }) => {
+  // Memoizing everything "just in case"
+  const renderItem = useCallback((item: string) => {
+    return <span>{item}</span>;
+  }, []);
+
+  const sortedItems = useMemo(() => items.sort(), [items]);
+
+  return (
+    <div>
+      {sortedItems.map(item => (
+        <MemoizedItem key={item} render={renderItem} item={item} />
+      ))}
+    </div>
+  );
+};
+
+const MemoizedItem = memo(({ item, render }: { item: string; render: (item: string) => JSX.Element }) => {
+  return render(item);
+});
+```
+
+### Why It's Wrong
+
+Premature optimization adds complexity without measurable benefit. `useMemo`, `useCallback`, and `memo` have their own overhead.
+
+### Solution
+
+```tsx
+const List = ({ items }: { items: string[] }) => {
+  // Only optimize when you've measured a performance problem
+  const sortedItems = [...items].sort();
+
+  return (
+    <div>
+      {sortedItems.map(item => (
+        <span key={item}>{item}</span>
+      ))}
+    </div>
+  );
+};
+```
+
+<Callout type="info">
+Profile first, optimize second. React is fast by default.
+</Callout>
+
+---
+
+## Memory Leaks
+
+### Problem
+
+```tsx
+const Timer = () => {
+  const [count, setCount] = useState(0);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setCount(c => c + 1);
+    }, 1000);
+    // No cleanup!
+  }, []);
+
+  return <div>{count}</div>;
+};
+```
+
+### Why It's Wrong
+
+Without cleanup, intervals, event listeners, and subscriptions continue running after the component unmounts, causing memory leaks.
+
+### Solution
+
+```tsx
+const Timer = () => {
+  const [count, setCount] = useState(0);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setCount(c => c + 1);
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, []);
+
+  return <div>{count}</div>;
+};
+```
+
+---
+
+## Stale Closures
+
+### Problem
+
+```tsx
+const Counter = () => {
+  const [count, setCount] = useState(0);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      console.log('Count:', count); // Always logs initial value
+      setCount(count + 1); // Always sets to 1
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, []); // Empty deps captures initial count
+
+  return <div>{count}</div>;
+};
+```
+
+### Why It's Wrong
+
+The effect closure captures the initial `count` value. Without `count` in dependencies, it never sees updated values.
+
+### Solution
+
+```tsx
+const Counter = () => {
+  const [count, setCount] = useState(0);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setCount(c => c + 1); // Functional update always has latest
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, []);
+
+  return <div>{count}</div>;
+};
+
+// Or use a ref for values you need to read but not react to
+const Counter = () => {
+  const [count, setCount] = useState(0);
+  const countRef = useRef(count);
+  countRef.current = count;
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      console.log('Count:', countRef.current); // Always current
+      setCount(c => c + 1);
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, []);
+
+  return <div>{count}</div>;
+};
+```
+
+---
+
+## Wrong Dependency Arrays
+
+### Problem
+
+```tsx
+const SearchResults = ({ query, filters }: { query: string; filters: Filter[] }) => {
+  const [results, setResults] = useState<Result[]>([]);
+
+  useEffect(() => {
+    fetchResults(query, filters).then(setResults);
+  }, [query]); // Missing filters dependency
+
+  return <ResultsList results={results} />;
+};
+```
+
+### Why It's Wrong
+
+Missing dependencies cause the effect to not run when it should. ESLint's `exhaustive-deps` rule exists for this reason.
+
+### Solution
+
+```tsx
+const SearchResults = ({ query, filters }: { query: string; filters: Filter[] }) => {
+  const [results, setResults] = useState<Result[]>([]);
+
+  useEffect(() => {
+    fetchResults(query, filters).then(setResults);
+  }, [query, filters]); // All dependencies included
+
+  return <ResultsList results={results} />;
+};
+```
+
+<Callout type="warn">
+Never lie about dependencies. If your effect needs a value, include it.
+</Callout>
+
+---
+
+## Conditional Hook Calls
+
+### Problem
+
+```tsx
+const UserData = ({ userId }: { userId: string | null }) => {
+  if (!userId) {
+    return <div>No user selected</div>;
+  }
+
+  // Hooks after conditional return - breaks rules of hooks
+  const [user, setUser] = useState<User | null>(null);
+
+  useEffect(() => {
+    fetchUser(userId).then(setUser);
+  }, [userId]);
+
+  return <div>{user?.name}</div>;
+};
+```
+
+### Why It's Wrong
+
+Hooks must be called in the same order every render. Conditional returns before hooks break this rule.
+
+### Solution
+
+```tsx
+const UserData = ({ userId }: { userId: string | null }) => {
+  const [user, setUser] = useState<User | null>(null);
+
+  useEffect(() => {
+    if (userId) {
+      fetchUser(userId).then(setUser);
+    }
+  }, [userId]);
+
+  if (!userId) {
+    return <div>No user selected</div>;
+  }
+
+  return <div>{user?.name}</div>;
+};
+```
+
+---
+
+## Copy-Paste State Sync
+
+### Problem
+
+```tsx
+const Form = ({ initialName }: { initialName: string }) => {
+  const [name, setName] = useState(initialName);
+
+  // Trying to sync prop to state
+  useEffect(() => {
+    setName(initialName);
+  }, [initialName]);
+
+  return <input value={name} onChange={e => setName(e.target.value)} />;
+};
+```
+
+### Why It's Wrong
+
+Copying props to state creates two sources of truth. The effect sync is fragile and causes extra renders.
+
+### Solution
+
+```tsx
+// Option 1: Controlled component (parent owns state)
+const Form = ({ name, onNameChange }: { name: string; onNameChange: (name: string) => void }) => {
+  return <input value={name} onChange={e => onNameChange(e.target.value)} />;
+};
+
+// Option 2: Use key to reset (when you need local edits)
+const Parent = () => {
+  const [userId, setUserId] = useState('1');
+  const [initialName, setInitialName] = useState('John');
+
+  return <Form key={userId} initialName={initialName} />;
+};
+
+const Form = ({ initialName }: { initialName: string }) => {
+  const [name, setName] = useState(initialName);
+  return <input value={name} onChange={e => setName(e.target.value)} />;
+};
+```
+
+---
+
+## God Components
+
+### Problem
+
+```tsx
+const Dashboard = () => {
+  const [user, setUser] = useState<User | null>(null);
+  const [posts, setPosts] = useState<Post[]>([]);
+  const [comments, setComments] = useState<Comment[]>([]);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [settings, setSettings] = useState<Settings | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState('posts');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filters, setFilters] = useState<Filter[]>([]);
+  // ... 200 more lines of state, effects, and handlers
+
+  return (
+    <div>
+      {/* 500 lines of JSX */}
+    </div>
+  );
+};
+```
+
+### Why It's Wrong
+
+- Hard to test individual pieces
+- Changes risk breaking unrelated features
+- Difficult to understand and maintain
+- Poor reusability
+
+### Solution
+
+```tsx
+// Split into focused components
+const Dashboard = () => {
+  const [activeTab, setActiveTab] = useState('posts');
+
+  return (
+    <div>
+      <TabNavigation activeTab={activeTab} onTabChange={setActiveTab} />
+      <DashboardContent activeTab={activeTab} />
+    </div>
+  );
+};
+
+const DashboardContent = ({ activeTab }: { activeTab: string }) => {
+  switch (activeTab) {
+    case 'posts':
+      return <PostsSection />;
+    case 'comments':
+      return <CommentsSection />;
+    case 'settings':
+      return <SettingsSection />;
+    default:
+      return null;
+  }
+};
+
+const PostsSection = () => {
+  const [posts, setPosts] = useState<Post[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  // Only posts-related logic here
+
+  return (
+    <div>
+      <SearchBar query={searchQuery} onQueryChange={setSearchQuery} />
+      <PostsList posts={posts} />
+    </div>
+  );
+};
+```
+
+<Callout type="info">
+A component should do one thing well. If you can't describe it in one sentence, split it.
+</Callout>

@@ -1,0 +1,380 @@
+---
+title: Error Boundaries
+description: Catching and handling errors in React component trees
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## What Are Error Boundaries?
+
+Error boundaries are React components that catch JavaScript errors anywhere in their child component tree, log those errors, and display a fallback UI instead of crashing the entire application.
+
+<Callout type="warn" title="Class Components Only">
+Error boundaries must be class components. There is no hook equivalent for `componentDidCatch` or `getDerivedStateFromError`.
+</Callout>
+
+---
+
+## Basic Implementation
+
+```tsx
+import { Component, ErrorInfo, ReactNode } from 'react';
+
+interface Props {
+  children: ReactNode;
+  fallback?: ReactNode;
+}
+
+interface State {
+  hasError: boolean;
+  error: Error | null;
+}
+
+class ErrorBoundary extends Component<Props, State> {
+  constructor(props: Props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error): State {
+    // Update state so the next render shows the fallback UI
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: ErrorInfo): void {
+    // Log error to monitoring service
+    console.error('Error caught by boundary:', error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return this.props.fallback ?? <h1>Something went wrong.</h1>;
+    }
+
+    return this.props.children;
+  }
+}
+```
+
+---
+
+## Key Methods
+
+### getDerivedStateFromError
+
+Static method called during render phase when a descendant throws:
+
+```tsx
+static getDerivedStateFromError(error: Error): State {
+  // Must return state update
+  // Cannot perform side effects here
+  return { hasError: true, error };
+}
+```
+
+### componentDidCatch
+
+Instance method called during commit phase with error details:
+
+```tsx
+componentDidCatch(error: Error, errorInfo: ErrorInfo): void {
+  // errorInfo.componentStack contains the component stack trace
+  // Perform side effects here: logging, analytics, etc.
+  logErrorToService(error, errorInfo.componentStack);
+}
+```
+
+| Method | Phase | Use For |
+|--------|-------|---------|
+| `getDerivedStateFromError` | Render | Update state to show fallback |
+| `componentDidCatch` | Commit | Logging, side effects |
+
+---
+
+## What Errors Are Caught
+
+Error boundaries catch errors in:
+
+| Caught | Not Caught |
+|--------|------------|
+| Render methods | Event handlers |
+| Lifecycle methods | Async code (setTimeout, promises) |
+| Constructors of child tree | Server-side rendering |
+| Static getDerivedStateFromError | Errors in the boundary itself |
+
+### Handling Uncaught Errors
+
+```tsx
+// Event handlers - use try/catch
+function Button() {
+  const handleClick = () => {
+    try {
+      riskyOperation();
+    } catch (error) {
+      // Handle locally or set error state
+      setError(error);
+    }
+  };
+  return <button onClick={handleClick}>Click</button>;
+}
+
+// Async code - catch and set state
+function AsyncComponent() {
+  const [error, setError] = useState<Error | null>(null);
+
+  useEffect(() => {
+    fetchData()
+      .catch(setError);
+  }, []);
+
+  if (error) throw error; // Now boundary catches it
+  return <div>Content</div>;
+}
+```
+
+---
+
+## Granular Boundaries
+
+Place boundaries strategically to isolate failures:
+
+```tsx
+function App() {
+  return (
+    <div className="app">
+      {/* Critical: Don't let header crash app */}
+      <ErrorBoundary fallback={<SimpleHeader />}>
+        <Header />
+      </ErrorBoundary>
+
+      <main>
+        {/* Sidebar failure shouldn't affect main content */}
+        <ErrorBoundary fallback={<SidebarFallback />}>
+          <Sidebar />
+        </ErrorBoundary>
+
+        {/* Main content has its own boundary */}
+        <ErrorBoundary fallback={<ContentError />}>
+          <MainContent />
+        </ErrorBoundary>
+      </main>
+
+      <ErrorBoundary fallback={null}>
+        <Footer />
+      </ErrorBoundary>
+    </div>
+  );
+}
+```
+
+### Boundary Placement Strategy
+
+| Placement | Use Case |
+|-----------|----------|
+| Route level | Isolate page failures |
+| Feature level | Independent features can fail separately |
+| Widget level | Third-party or risky components |
+| List item level | One item failure doesn't break list |
+
+---
+
+## TypeScript Typing
+
+### Full Implementation with Types
+
+```tsx
+import { Component, ErrorInfo, ReactNode } from 'react';
+
+interface ErrorBoundaryProps {
+  children: ReactNode;
+  fallback?: ReactNode;
+  fallbackRender?: (props: FallbackProps) => ReactNode;
+  onError?: (error: Error, errorInfo: ErrorInfo) => void;
+  onReset?: () => void;
+}
+
+interface FallbackProps {
+  error: Error;
+  resetErrorBoundary: () => void;
+}
+
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+}
+
+class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: ErrorInfo): void {
+    this.props.onError?.(error, errorInfo);
+  }
+
+  resetErrorBoundary = (): void => {
+    this.props.onReset?.();
+    this.setState({ hasError: false, error: null });
+  };
+
+  render(): ReactNode {
+    const { hasError, error } = this.state;
+    const { children, fallback, fallbackRender } = this.props;
+
+    if (hasError && error) {
+      if (fallbackRender) {
+        return fallbackRender({
+          error,
+          resetErrorBoundary: this.resetErrorBoundary,
+        });
+      }
+      return fallback ?? <h1>Something went wrong.</h1>;
+    }
+
+    return children;
+  }
+}
+```
+
+---
+
+## Reset Patterns
+
+### Manual Reset
+
+```tsx
+class ErrorBoundary extends Component<Props, State> {
+  // ... other methods
+
+  resetErrorBoundary = () => {
+    this.setState({ hasError: false, error: null });
+  };
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div>
+          <p>Something went wrong</p>
+          <button onClick={this.resetErrorBoundary}>
+            Try again
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+```
+
+### Reset on Prop Change
+
+```tsx
+interface Props {
+  children: ReactNode;
+  resetKeys?: unknown[];
+}
+
+class ErrorBoundary extends Component<Props, State> {
+  static getDerivedStateFromProps(
+    props: Props,
+    state: State
+  ): Partial<State> | null {
+    // Reset when resetKeys change
+    if (state.hasError) {
+      return { hasError: false, error: null };
+    }
+    return null;
+  }
+
+  componentDidUpdate(prevProps: Props): void {
+    if (
+      this.state.hasError &&
+      !arraysEqual(prevProps.resetKeys, this.props.resetKeys)
+    ) {
+      this.setState({ hasError: false, error: null });
+    }
+  }
+}
+
+// Usage: Reset when userId changes
+<ErrorBoundary resetKeys={[userId]}>
+  <UserProfile userId={userId} />
+</ErrorBoundary>
+```
+
+---
+
+## When to Use
+
+| Use Error Boundaries | Don't Use For |
+|---------------------|---------------|
+| Unknown/risky child components | Expected errors with known handling |
+| Third-party components | Form validation errors |
+| Feature isolation | API error responses |
+| Route-level protection | Errors you can recover from locally |
+
+---
+
+## Common Mistakes
+
+### 1. Single Global Boundary
+
+```tsx
+// Bad: One error crashes entire app
+function App() {
+  return (
+    <ErrorBoundary>
+      <EntireApp />
+    </ErrorBoundary>
+  );
+}
+
+// Good: Granular boundaries
+function App() {
+  return (
+    <>
+      <ErrorBoundary><Header /></ErrorBoundary>
+      <ErrorBoundary><MainContent /></ErrorBoundary>
+      <ErrorBoundary><Footer /></ErrorBoundary>
+    </>
+  );
+}
+```
+
+### 2. Catching Async Errors Directly
+
+```tsx
+// Bad: Won't be caught
+useEffect(() => {
+  fetchData(); // Promise rejection not caught
+}, []);
+
+// Good: Handle and re-throw synchronously
+useEffect(() => {
+  fetchData().catch(error => {
+    setError(error); // Store error
+  });
+}, []);
+
+// In render, throw stored error
+if (error) throw error;
+```
+
+### 3. No Fallback UI
+
+```tsx
+// Bad: Empty screen on error
+<ErrorBoundary>
+  <Content />
+</ErrorBoundary>
+
+// Good: Meaningful fallback
+<ErrorBoundary fallback={<ErrorMessage />}>
+  <Content />
+</ErrorBoundary>
+```

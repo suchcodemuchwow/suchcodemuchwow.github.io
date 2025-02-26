@@ -1,0 +1,30 @@
+{
+  "title": "React",
+  "icon": "Atom",
+  "root": true,
+  "pages": [
+    "---Getting Started---",
+    "index",
+    "fundamentals",
+    "project-structure",
+    "---Core Concepts---",
+    "hooks",
+    "state-management",
+    "typescript",
+    "forms",
+    "data-fetching",
+    "error-handling",
+    "---Advanced Topics---",
+    "performance",
+    "testing",
+    "accessibility",
+    "styling",
+    "dom-refs",
+    "portals-overlays",
+    "lists-rendering",
+    "effects-lifecycle",
+    "concurrent-react",
+    "security",
+    "anti-patterns"
+  ]
+}

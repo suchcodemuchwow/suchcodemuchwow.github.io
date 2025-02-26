@@ -1,0 +1,472 @@
+---
+title: Race Conditions
+description: Understanding and preventing race conditions in React data fetching
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## Overview
+
+Race conditions occur when multiple asynchronous operations compete to update state, and the order of completion differs from the order of initiation. This is a common bug in React applications with data fetching.
+
+## Problem Explanation
+
+### The Classic Race Condition
+
+```tsx
+import { useState, useEffect } from 'react';
+
+// BUG: Race condition when userId changes rapidly
+function UserProfile({ userId }: { userId: number }) {
+  const [user, setUser] = useState<User | null>(null);
+
+  useEffect(() => {
+    fetch(`/api/users/${userId}`)
+      .then(res => res.json())
+      .then(data => setUser(data)); // May set stale data!
+  }, [userId]);
+
+  return <div>{user?.name}</div>;
+}
+```
+
+**What happens:**
+1. User clicks User A (userId = 1)
+2. Request for User A starts (takes 3 seconds)
+3. User clicks User B (userId = 2)
+4. Request for User B starts (takes 1 second)
+5. User B response arrives - state updates to User B
+6. User A response arrives - state updates to User A (WRONG!)
+
+The user sees User A's data even though they selected User B.
+
+<Callout type="error">
+Race conditions cause incorrect data display. The user expects to see User B but sees User A because the slower request completed last.
+</Callout>
+
+## Stale Closure Issues
+
+Closures capture variables at creation time, which can lead to stale references.
+
+```tsx
+import { useState, useEffect } from 'react';
+
+// BUG: Stale closure
+function Counter() {
+  const [count, setCount] = useState(0);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      // count is always 0 (captured at creation)
+      setCount(count + 1);
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, []); // Empty deps = stale closure
+
+  return <div>{count}</div>;
+}
+
+// FIX: Use functional update
+function CounterFixed() {
+  const [count, setCount] = useState(0);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      // Uses latest state value
+      setCount(prev => prev + 1);
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, []);
+
+  return <div>{count}</div>;
+}
+```
+
+### Stale Closure in Data Fetching
+
+```tsx
+import { useState, useEffect } from 'react';
+
+// BUG: selectedId might be stale when response arrives
+function ItemDetails({ selectedId }: { selectedId: number }) {
+  const [item, setItem] = useState<Item | null>(null);
+
+  useEffect(() => {
+    fetch(`/api/items/${selectedId}`)
+      .then(res => res.json())
+      .then(data => {
+        // selectedId here is captured from when effect ran
+        // If selectedId changed, this is stale
+        console.log(`Setting item for id: ${selectedId}`);
+        setItem(data);
+      });
+  }, [selectedId]);
+
+  return <div>{item?.name}</div>;
+}
+```
+
+## AbortController Solution
+
+The most robust solution for canceling in-flight requests.
+
+```tsx
+import { useState, useEffect } from 'react';
+
+function UserProfile({ userId }: { userId: number }) {
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    const fetchUser = async () => {
+      setLoading(true);
+      setError(null);
+
+      try {
+        const response = await fetch(`/api/users/${userId}`, {
+          signal: controller.signal
+        });
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+        setUser(data);
+      } catch (err) {
+        // Ignore abort errors - request was intentionally cancelled
+        if (err instanceof Error && err.name === 'AbortError') {
+          return;
+        }
+        setError(err instanceof Error ? err : new Error('Unknown error'));
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchUser();
+
+    // Cleanup: abort the request if userId changes or component unmounts
+    return () => {
+      controller.abort();
+    };
+  }, [userId]);
+
+  if (loading) return <div>Loading...</div>;
+  if (error) return <div>Error: {error.message}</div>;
+
+  return <div>{user?.name}</div>;
+}
+```
+
+### How AbortController Works
+
+| Step | Action |
+|------|--------|
+| 1 | Create `AbortController` at effect start |
+| 2 | Pass `signal` to fetch options |
+| 3 | If dependency changes, cleanup runs |
+| 4 | `controller.abort()` cancels the request |
+| 5 | Fetch throws `AbortError` |
+| 6 | Ignore `AbortError` in catch block |
+
+<Callout type="info">
+AbortController cancels the actual HTTP request, not just ignores the response. This saves bandwidth and server resources.
+</Callout>
+
+## Boolean Flag Pattern
+
+A simpler alternative when AbortController seems like overkill.
+
+```tsx
+import { useState, useEffect } from 'react';
+
+function UserProfile({ userId }: { userId: number }) {
+  const [user, setUser] = useState<User | null>(null);
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    const fetchUser = async () => {
+      try {
+        const response = await fetch(`/api/users/${userId}`);
+        const data = await response.json();
+
+        // Only update state if this effect is still "active"
+        if (!isCancelled) {
+          setUser(data);
+        }
+      } catch (error) {
+        if (!isCancelled) {
+          console.error(error);
+        }
+      }
+    };
+
+    fetchUser();
+
+    // Cleanup: mark this effect as cancelled
+    return () => {
+      isCancelled = true;
+    };
+  }, [userId]);
+
+  return <div>{user?.name}</div>;
+}
+```
+
+### Pros & Cons
+
+| Approach | Pros | Cons |
+|----------|------|------|
+| AbortController | Actually cancels request, saves bandwidth | Slightly more complex |
+| Boolean flag | Simpler, no API knowledge needed | Request still completes, wastes bandwidth |
+
+## Request ID Pattern
+
+Track requests by ID to ensure only the latest response is used.
+
+```tsx
+import { useState, useEffect, useRef } from 'react';
+
+function SearchResults({ query }: { query: string }) {
+  const [results, setResults] = useState<SearchResult[]>([]);
+  const [loading, setLoading] = useState(false);
+  const requestIdRef = useRef(0);
+
+  useEffect(() => {
+    if (!query) {
+      setResults([]);
+      return;
+    }
+
+    // Increment request ID for this request
+    const currentRequestId = ++requestIdRef.current;
+
+    setLoading(true);
+
+    fetch(`/api/search?q=${encodeURIComponent(query)}`)
+      .then(res => res.json())
+      .then(data => {
+        // Only update if this is still the latest request
+        if (currentRequestId === requestIdRef.current) {
+          setResults(data);
+          setLoading(false);
+        }
+      })
+      .catch(error => {
+        if (currentRequestId === requestIdRef.current) {
+          console.error(error);
+          setLoading(false);
+        }
+      });
+  }, [query]);
+
+  return (
+    <div>
+      {loading && <div>Searching...</div>}
+      <ul>
+        {results.map(r => <li key={r.id}>{r.title}</li>)}
+      </ul>
+    </div>
+  );
+}
+```
+
+### Combined: AbortController + Request ID
+
+For maximum safety, combine both approaches.
+
+```tsx
+import { useState, useEffect, useRef } from 'react';
+
+function RobustSearch({ query }: { query: string }) {
+  const [results, setResults] = useState<SearchResult[]>([]);
+  const requestIdRef = useRef(0);
+
+  useEffect(() => {
+    if (!query) return;
+
+    const controller = new AbortController();
+    const currentRequestId = ++requestIdRef.current;
+
+    fetch(`/api/search?q=${encodeURIComponent(query)}`, {
+      signal: controller.signal
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (currentRequestId === requestIdRef.current) {
+          setResults(data);
+        }
+      })
+      .catch(err => {
+        if (err.name !== 'AbortError' && currentRequestId === requestIdRef.current) {
+          console.error(err);
+        }
+      });
+
+    return () => {
+      controller.abort();
+    };
+  }, [query]);
+
+  return <ul>{results.map(r => <li key={r.id}>{r.title}</li>)}</ul>;
+}
+```
+
+## Cleanup in useEffect
+
+Understanding the cleanup function is essential for preventing race conditions.
+
+```tsx
+import { useEffect } from 'react';
+
+function DataFetcher({ id }: { id: number }) {
+  useEffect(() => {
+    // Setup: runs when effect executes
+
+    const controller = new AbortController();
+
+    fetch(`/api/data/${id}`, { signal: controller.signal })
+      .then(res => res.json())
+      .then(console.log);
+
+    // Cleanup: runs BEFORE next effect or on unmount
+    return () => {
+      controller.abort();
+    };
+  }, [id]);
+
+  // Cleanup runs in these scenarios:
+  // 1. Before effect re-runs (when id changes)
+  // 2. When component unmounts
+
+  return <div>...</div>;
+}
+```
+
+### Cleanup Execution Order
+
+```tsx
+// When id changes from 1 to 2:
+// 1. Cleanup for id=1 runs (aborts request)
+// 2. Effect for id=2 runs (starts new request)
+
+// When component unmounts:
+// 1. Cleanup runs (aborts any pending request)
+```
+
+<Callout type="warn">
+Always return a cleanup function from effects that start async operations. Without cleanup, you risk memory leaks and state updates on unmounted components.
+</Callout>
+
+## Testing Race Conditions
+
+### Manual Testing Approach
+
+```tsx
+// Add artificial delay to simulate slow network
+function useDelayedFetch<T>(url: string, delay: number) {
+  const [data, setData] = useState<T | null>(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    const fetchData = async () => {
+      try {
+        // Artificial delay for testing
+        await new Promise(resolve => setTimeout(resolve, delay));
+
+        const res = await fetch(url, { signal: controller.signal });
+        const result = await res.json();
+        setData(result);
+      } catch (err) {
+        if (err instanceof Error && err.name !== 'AbortError') {
+          console.error(err);
+        }
+      }
+    };
+
+    fetchData();
+    return () => controller.abort();
+  }, [url, delay]);
+
+  return data;
+}
+
+// Test: render with delay=3000, quickly change props
+// If race condition exists, wrong data will display
+```
+
+### Unit Test Example
+
+```tsx
+import { render, screen, waitFor, act } from '@testing-library/react';
+
+// Mock fetch with controlled timing
+function createDeferredFetch() {
+  let resolve: (value: unknown) => void;
+  const promise = new Promise(r => { resolve = r; });
+
+  return {
+    promise,
+    resolve: (data: unknown) => resolve!(data)
+  };
+}
+
+test('handles race condition correctly', async () => {
+  const fetch1 = createDeferredFetch();
+  const fetch2 = createDeferredFetch();
+
+  let fetchCallCount = 0;
+  global.fetch = jest.fn(() => {
+    fetchCallCount++;
+    return fetchCallCount === 1
+      ? fetch1.promise.then(() => ({ json: () => ({ name: 'User 1' }) }))
+      : fetch2.promise.then(() => ({ json: () => ({ name: 'User 2' }) }));
+  }) as jest.Mock;
+
+  const { rerender } = render(<UserProfile userId={1} />);
+
+  // Change userId before first request completes
+  rerender(<UserProfile userId={2} />);
+
+  // Resolve second request first (faster)
+  await act(async () => {
+    fetch2.resolve(undefined);
+  });
+
+  // Resolve first request last (slower)
+  await act(async () => {
+    fetch1.resolve(undefined);
+  });
+
+  // Should show User 2, not User 1
+  await waitFor(() => {
+    expect(screen.getByText('User 2')).toBeInTheDocument();
+  });
+});
+```
+
+## Summary: Which Pattern to Use
+
+| Pattern | When to Use |
+|---------|-------------|
+| AbortController | Default choice, actually cancels network request |
+| Boolean flag | Simple cases, when AbortController feels like overkill |
+| Request ID | When you need to track specific requests |
+| Combined | Critical data, when correctness is paramount |
+
+### Checklist for Race Condition Prevention
+
+- [ ] Use AbortController in useEffect cleanup
+- [ ] Check for `AbortError` in catch blocks
+- [ ] Never update state after component unmounts
+- [ ] Consider request ID for complex scenarios
+- [ ] Test with artificial delays
+- [ ] Use functional state updates to avoid stale closures

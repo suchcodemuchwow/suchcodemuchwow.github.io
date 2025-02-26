@@ -1,0 +1,713 @@
+---
+title: Accessibility Testing
+description: Guide to testing accessibility in React applications using jest-axe, React Testing Library, and Playwright with automated and manual testing strategies
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+# Accessibility Testing
+
+Accessibility (a11y) testing ensures that applications are usable by people with disabilities. This guide covers automated tools, testing patterns, and best practices for React applications.
+
+## Why Accessibility Testing Matters
+
+| Impact Area | Without A11y Testing | With A11y Testing |
+|-------------|---------------------|-------------------|
+| User reach | Excludes ~15% of users | Inclusive experience |
+| Legal compliance | Risk of lawsuits | ADA/WCAG compliance |
+| SEO | Poor semantic markup | Better search rankings |
+| Code quality | Div soup | Semantic HTML |
+| User experience | Frustrating for all | Better for everyone |
+
+<Callout type="info">
+Automated testing catches about 30-40% of accessibility issues. Manual testing and real user feedback are essential for complete coverage.
+</Callout>
+
+## Setup
+
+### Installing Dependencies
+
+```bash
+npm install -D jest-axe @axe-core/playwright
+```
+
+### Configuration for Vitest
+
+```typescript
+// src/test/setup.ts
+import '@testing-library/jest-dom/vitest';
+import { toHaveNoViolations } from 'jest-axe';
+import { expect } from 'vitest';
+
+expect.extend(toHaveNoViolations);
+```
+
+### TypeScript Types
+
+```typescript
+// src/test/types.d.ts
+import 'vitest';
+import { AxeMatchers } from 'jest-axe';
+
+declare module 'vitest' {
+  interface Assertion<T = unknown> extends AxeMatchers {}
+  interface AsymmetricMatchersContaining extends AxeMatchers {}
+}
+```
+
+## Automated Accessibility Testing with jest-axe
+
+### Basic Component Test
+
+```typescript
+import { render } from '@testing-library/react';
+import { axe } from 'jest-axe';
+import { Button } from './Button';
+
+describe('Button accessibility', () => {
+  it('has no accessibility violations', async () => {
+    const { container } = render(<Button>Click me</Button>);
+    const results = await axe(container);
+    expect(results).toHaveNoViolations();
+  });
+
+  it('has no violations when disabled', async () => {
+    const { container } = render(<Button disabled>Disabled</Button>);
+    const results = await axe(container);
+    expect(results).toHaveNoViolations();
+  });
+});
+```
+
+### Testing Forms
+
+```typescript
+// ContactForm.tsx
+export function ContactForm() {
+  return (
+    <form>
+      <div>
+        <label htmlFor="name">Name</label>
+        <input id="name" type="text" required />
+      </div>
+      <div>
+        <label htmlFor="email">Email</label>
+        <input id="email" type="email" required />
+      </div>
+      <div>
+        <label htmlFor="message">Message</label>
+        <textarea id="message" required />
+      </div>
+      <button type="submit">Send</button>
+    </form>
+  );
+}
+
+// ContactForm.test.tsx
+import { render, screen } from '@testing-library/react';
+import { axe } from 'jest-axe';
+import { ContactForm } from './ContactForm';
+
+describe('ContactForm accessibility', () => {
+  it('has no violations', async () => {
+    const { container } = render(<ContactForm />);
+    const results = await axe(container);
+    expect(results).toHaveNoViolations();
+  });
+
+  it('has accessible form labels', () => {
+    render(<ContactForm />);
+
+    // Labels should be properly associated
+    expect(screen.getByLabelText('Name')).toBeInTheDocument();
+    expect(screen.getByLabelText('Email')).toBeInTheDocument();
+    expect(screen.getByLabelText('Message')).toBeInTheDocument();
+  });
+
+  it('has descriptive submit button', () => {
+    render(<ContactForm />);
+    expect(screen.getByRole('button', { name: 'Send' })).toBeInTheDocument();
+  });
+});
+```
+
+### Configuring axe Rules
+
+```typescript
+import { axe, toHaveNoViolations } from 'jest-axe';
+
+describe('Component with known issues', () => {
+  it('passes with specific rules disabled', async () => {
+    const { container } = render(<LegacyComponent />);
+
+    const results = await axe(container, {
+      rules: {
+        // Disable specific rules
+        'color-contrast': { enabled: false },
+        region: { enabled: false },
+      },
+    });
+
+    expect(results).toHaveNoViolations();
+  });
+
+  it('runs only specific rules', async () => {
+    const { container } = render(<FormComponent />);
+
+    const results = await axe(container, {
+      runOnly: {
+        type: 'tag',
+        values: ['wcag2a', 'wcag2aa'],
+      },
+    });
+
+    expect(results).toHaveNoViolations();
+  });
+});
+```
+
+## Testing with React Testing Library
+
+### Accessible Queries
+
+React Testing Library's queries prioritize accessibility. Use them to verify accessible markup.
+
+| Query | Tests For |
+|-------|-----------|
+| `getByRole` | ARIA roles and accessible names |
+| `getByLabelText` | Form label associations |
+| `getByAltText` | Image alt text |
+| `getByTitle` | Title attributes |
+
+```typescript
+describe('Navigation accessibility', () => {
+  it('has accessible navigation structure', () => {
+    render(<Header />);
+
+    // Navigation landmark
+    expect(screen.getByRole('navigation')).toBeInTheDocument();
+
+    // Links with accessible names
+    expect(screen.getByRole('link', { name: 'Home' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Products' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Contact' })).toBeInTheDocument();
+  });
+
+  it('has accessible logo image', () => {
+    render(<Header />);
+    expect(screen.getByAltText('Company Logo')).toBeInTheDocument();
+  });
+
+  it('has skip link for keyboard users', () => {
+    render(<Header />);
+    expect(screen.getByRole('link', { name: /skip to main/i })).toBeInTheDocument();
+  });
+});
+```
+
+### Testing ARIA Attributes
+
+```typescript
+describe('Accordion accessibility', () => {
+  it('has correct ARIA attributes', async () => {
+    const user = userEvent.setup();
+    render(<Accordion items={mockItems} />);
+
+    const button = screen.getByRole('button', { name: 'Section 1' });
+
+    // Initially collapsed
+    expect(button).toHaveAttribute('aria-expanded', 'false');
+
+    // Associated panel
+    const panelId = button.getAttribute('aria-controls');
+    const panel = document.getElementById(panelId!);
+    expect(panel).toHaveAttribute('aria-hidden', 'true');
+
+    // Expand
+    await user.click(button);
+
+    expect(button).toHaveAttribute('aria-expanded', 'true');
+    expect(panel).toHaveAttribute('aria-hidden', 'false');
+  });
+
+  it('has correct heading structure', () => {
+    render(<Accordion items={mockItems} />);
+
+    // Buttons should be in headings
+    const headings = screen.getAllByRole('heading', { level: 3 });
+    expect(headings).toHaveLength(mockItems.length);
+  });
+});
+```
+
+### Testing Focus Management
+
+```typescript
+describe('Modal accessibility', () => {
+  it('traps focus within modal', async () => {
+    const user = userEvent.setup();
+    render(<ModalExample />);
+
+    // Open modal
+    await user.click(screen.getByRole('button', { name: 'Open modal' }));
+
+    const modal = screen.getByRole('dialog');
+    const closeButton = screen.getByRole('button', { name: 'Close' });
+    const confirmButton = screen.getByRole('button', { name: 'Confirm' });
+
+    // Focus should be in modal
+    expect(closeButton).toHaveFocus();
+
+    // Tab should cycle within modal
+    await user.tab();
+    expect(confirmButton).toHaveFocus();
+
+    await user.tab();
+    expect(closeButton).toHaveFocus(); // Wraps back
+  });
+
+  it('returns focus on close', async () => {
+    const user = userEvent.setup();
+    render(<ModalExample />);
+
+    const trigger = screen.getByRole('button', { name: 'Open modal' });
+    await user.click(trigger);
+
+    await user.click(screen.getByRole('button', { name: 'Close' }));
+
+    // Focus returns to trigger
+    expect(trigger).toHaveFocus();
+  });
+
+  it('closes on Escape key', async () => {
+    const user = userEvent.setup();
+    render(<ModalExample />);
+
+    await user.click(screen.getByRole('button', { name: 'Open modal' }));
+    expect(screen.getByRole('dialog')).toBeVisible();
+
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+});
+```
+
+### Testing Keyboard Navigation
+
+```typescript
+describe('Dropdown accessibility', () => {
+  it('supports keyboard navigation', async () => {
+    const user = userEvent.setup();
+    render(<Dropdown options={['Apple', 'Banana', 'Cherry']} />);
+
+    const trigger = screen.getByRole('combobox');
+
+    // Open with Enter
+    await user.click(trigger);
+    await user.keyboard('{Enter}');
+
+    const listbox = screen.getByRole('listbox');
+    expect(listbox).toBeVisible();
+
+    // Navigate with arrows
+    await user.keyboard('{ArrowDown}');
+    expect(screen.getByRole('option', { name: 'Apple' })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    );
+
+    await user.keyboard('{ArrowDown}');
+    expect(screen.getByRole('option', { name: 'Banana' })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    );
+
+    // Select with Enter
+    await user.keyboard('{Enter}');
+    expect(trigger).toHaveTextContent('Banana');
+    expect(listbox).not.toBeVisible();
+  });
+
+  it('supports type-ahead', async () => {
+    const user = userEvent.setup();
+    render(<Dropdown options={['Apple', 'Banana', 'Cherry']} />);
+
+    await user.click(screen.getByRole('combobox'));
+
+    // Type to filter
+    await user.keyboard('ch');
+
+    expect(screen.getByRole('option', { name: 'Cherry' })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    );
+  });
+});
+```
+
+## Testing Live Regions
+
+```typescript
+describe('Notification accessibility', () => {
+  it('announces notifications to screen readers', async () => {
+    const user = userEvent.setup();
+    render(<NotificationExample />);
+
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    // Status message should be in live region
+    const notification = screen.getByRole('status');
+    expect(notification).toHaveTextContent('Changes saved');
+    expect(notification).toHaveAttribute('aria-live', 'polite');
+  });
+
+  it('announces errors assertively', async () => {
+    const user = userEvent.setup();
+    render(<FormWithErrors />);
+
+    await user.click(screen.getByRole('button', { name: 'Submit' }));
+
+    const error = screen.getByRole('alert');
+    expect(error).toHaveAttribute('aria-live', 'assertive');
+  });
+});
+```
+
+## E2E Accessibility Testing with Playwright
+
+### Setup
+
+```typescript
+// playwright.config.ts
+import { defineConfig } from '@playwright/test';
+
+export default defineConfig({
+  use: {
+    // Enable accessibility testing
+  },
+});
+```
+
+### Basic Playwright A11y Test
+
+```typescript
+// e2e/accessibility.spec.ts
+import { test, expect } from '@playwright/test';
+import AxeBuilder from '@axe-core/playwright';
+
+test.describe('Accessibility', () => {
+  test('homepage has no violations', async ({ page }) => {
+    await page.goto('/');
+
+    const results = await new AxeBuilder({ page }).analyze();
+
+    expect(results.violations).toEqual([]);
+  });
+
+  test('login page has no violations', async ({ page }) => {
+    await page.goto('/login');
+
+    const results = await new AxeBuilder({ page }).analyze();
+
+    expect(results.violations).toEqual([]);
+  });
+});
+```
+
+### Testing Specific WCAG Levels
+
+```typescript
+test('meets WCAG 2.1 AA standards', async ({ page }) => {
+  await page.goto('/');
+
+  const results = await new AxeBuilder({ page })
+    .withTags(['wcag2a', 'wcag2aa', 'wcag21aa'])
+    .analyze();
+
+  expect(results.violations).toEqual([]);
+});
+
+test('meets WCAG 2.1 AAA standards', async ({ page }) => {
+  await page.goto('/');
+
+  const results = await new AxeBuilder({ page })
+    .withTags(['wcag2aaa', 'wcag21aaa'])
+    .analyze();
+
+  // Log violations instead of failing (AAA is aspirational)
+  if (results.violations.length > 0) {
+    console.log('AAA violations:', results.violations);
+  }
+});
+```
+
+### Scanning Specific Regions
+
+```typescript
+test('main content has no violations', async ({ page }) => {
+  await page.goto('/');
+
+  const results = await new AxeBuilder({ page })
+    .include('main')
+    .analyze();
+
+  expect(results.violations).toEqual([]);
+});
+
+test('excluding third-party widgets', async ({ page }) => {
+  await page.goto('/');
+
+  const results = await new AxeBuilder({ page })
+    .exclude('.third-party-widget')
+    .analyze();
+
+  expect(results.violations).toEqual([]);
+});
+```
+
+### Testing Interactive States
+
+```typescript
+test('modal has no violations when open', async ({ page }) => {
+  await page.goto('/');
+
+  // Open modal
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  await page.getByRole('dialog').waitFor();
+
+  const results = await new AxeBuilder({ page }).analyze();
+
+  expect(results.violations).toEqual([]);
+});
+
+test('dropdown menu is accessible', async ({ page }) => {
+  await page.goto('/');
+
+  // Open dropdown
+  await page.getByRole('button', { name: 'Menu' }).click();
+  await page.getByRole('menu').waitFor();
+
+  const results = await new AxeBuilder({ page })
+    .include('[role="menu"]')
+    .analyze();
+
+  expect(results.violations).toEqual([]);
+});
+```
+
+### Generating Reports
+
+```typescript
+// e2e/a11y-report.spec.ts
+import { test } from '@playwright/test';
+import AxeBuilder from '@axe-core/playwright';
+import { writeFileSync, mkdirSync } from 'fs';
+
+const pages = ['/', '/products', '/about', '/contact', '/login'];
+
+test.describe('Accessibility Audit', () => {
+  const allResults: Record<string, unknown> = {};
+
+  for (const path of pages) {
+    test(`audit ${path}`, async ({ page }) => {
+      await page.goto(path);
+
+      const results = await new AxeBuilder({ page }).analyze();
+
+      allResults[path] = {
+        violations: results.violations,
+        passes: results.passes.length,
+        incomplete: results.incomplete.length,
+      };
+    });
+  }
+
+  test.afterAll(() => {
+    mkdirSync('reports', { recursive: true });
+    writeFileSync(
+      'reports/accessibility-audit.json',
+      JSON.stringify(allResults, null, 2)
+    );
+  });
+});
+```
+
+## Common Accessibility Tests
+
+### Images
+
+```typescript
+describe('Image accessibility', () => {
+  it('informative images have alt text', () => {
+    render(<ProductCard product={mockProduct} />);
+
+    const image = screen.getByRole('img', { name: mockProduct.name });
+    expect(image).toHaveAttribute('alt', mockProduct.name);
+  });
+
+  it('decorative images are hidden from screen readers', () => {
+    render(<DecorativeBanner />);
+
+    const decorativeImages = document.querySelectorAll('img[alt=""]');
+    decorativeImages.forEach((img) => {
+      expect(img).toHaveAttribute('role', 'presentation');
+    });
+  });
+
+  it('complex images have detailed descriptions', () => {
+    render(<Chart data={mockData} />);
+
+    const chart = screen.getByRole('img', { name: /sales chart/i });
+    expect(chart).toHaveAttribute('aria-describedby');
+
+    const descriptionId = chart.getAttribute('aria-describedby');
+    const description = document.getElementById(descriptionId!);
+    expect(description).toBeInTheDocument();
+  });
+});
+```
+
+### Color Contrast
+
+```typescript
+describe('Color contrast', () => {
+  it('text meets contrast requirements', async () => {
+    const { container } = render(<TextContent />);
+
+    const results = await axe(container, {
+      rules: {
+        'color-contrast': { enabled: true },
+      },
+    });
+
+    expect(results).toHaveNoViolations();
+  });
+});
+```
+
+### Heading Structure
+
+```typescript
+describe('Heading structure', () => {
+  it('has proper heading hierarchy', () => {
+    render(<ArticlePage />);
+
+    const headings = screen.getAllByRole('heading');
+
+    // Should start with h1
+    expect(headings[0]).toHaveAttribute('aria-level', '1');
+
+    // Check hierarchy doesn't skip levels
+    let currentLevel = 1;
+    headings.forEach((heading) => {
+      const level = parseInt(heading.getAttribute('aria-level') || '0');
+      expect(level).toBeLessThanOrEqual(currentLevel + 1);
+      currentLevel = level;
+    });
+  });
+
+  it('has exactly one h1', () => {
+    render(<Page />);
+
+    const h1s = screen.getAllByRole('heading', { level: 1 });
+    expect(h1s).toHaveLength(1);
+  });
+});
+```
+
+### Form Validation
+
+```typescript
+describe('Form validation accessibility', () => {
+  it('associates error messages with inputs', async () => {
+    const user = userEvent.setup();
+    render(<RegistrationForm />);
+
+    await user.click(screen.getByRole('button', { name: 'Submit' }));
+
+    const emailInput = screen.getByLabelText('Email');
+    const errorId = emailInput.getAttribute('aria-describedby');
+    const error = document.getElementById(errorId!);
+
+    expect(error).toHaveTextContent('Email is required');
+    expect(emailInput).toHaveAttribute('aria-invalid', 'true');
+  });
+
+  it('announces validation errors', async () => {
+    const user = userEvent.setup();
+    render(<RegistrationForm />);
+
+    await user.click(screen.getByRole('button', { name: 'Submit' }));
+
+    // Error summary should be in live region
+    const errorSummary = screen.getByRole('alert');
+    expect(errorSummary).toHaveAttribute('aria-live', 'assertive');
+  });
+});
+```
+
+## Pros and Cons
+
+### Automated Testing
+
+| Pros | Cons |
+|------|------|
+| Fast and consistent | Catches only 30-40% of issues |
+| Easy to integrate in CI | Cannot test user experience |
+| Catches common issues | May have false positives |
+| Documents accessibility requirements | Misses context-dependent issues |
+
+### Manual Testing
+
+| Pros | Cons |
+|------|------|
+| Finds complex issues | Time-consuming |
+| Tests real user experience | Requires expertise |
+| Catches context-dependent problems | Hard to scale |
+| Validates screen reader behavior | Subjective results |
+
+## When to Use Automated A11y Testing
+
+Use automated testing for:
+- CI pipeline checks
+- Regression prevention
+- WCAG compliance basics
+- Component library validation
+- Pre-release audits
+
+## When NOT to Use (Alone)
+
+Do not rely only on automated testing for:
+- Complete WCAG compliance
+- Screen reader compatibility
+- Cognitive accessibility
+- User experience validation
+- Complex interactions
+
+<Callout type="warn">
+Automated testing is necessary but not sufficient. Combine with manual testing, screen reader testing, and user feedback for complete coverage.
+</Callout>
+
+## Manual Testing Checklist
+
+| Test | Tool | Frequency |
+|------|------|-----------|
+| Keyboard navigation | Tab through page | Every feature |
+| Screen reader | NVDA, VoiceOver | Major releases |
+| High contrast mode | OS settings | Quarterly |
+| Zoom to 200% | Browser zoom | Every feature |
+| Color blindness | Simulator | Design phase |
+| Reduced motion | OS settings | Animations |
+
+## Best Practices Summary
+
+| Practice | Description |
+|----------|-------------|
+| Test early | Include a11y in component development |
+| Use semantic HTML | Buttons, links, headings, landmarks |
+| Test keyboard access | All interactive elements reachable |
+| Provide text alternatives | Alt text, aria-labels |
+| Manage focus | Trapping, restoration, visible indicator |
+| Test with real tools | Screen readers, not just automated |
+| Document patterns | Share accessible component patterns |
+| Include in CI | Fail builds on violations |

@@ -1,0 +1,418 @@
+---
+title: Forwarding Refs
+description: Passing refs through components to access child DOM nodes
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## forwardRef Usage
+
+Pass refs through wrapper components to access underlying DOM:
+
+```tsx
+interface ButtonProps {
+  children: React.ReactNode;
+  variant?: 'primary' | 'secondary';
+}
+
+const Button = forwardRef<HTMLButtonElement, ButtonProps>(
+  function Button({ children, variant = 'primary' }, ref) {
+    return (
+      <button ref={ref} className={`btn btn-${variant}`}>
+        {children}
+      </button>
+    );
+  }
+);
+
+// Usage
+function Parent() {
+  const buttonRef = useRef<HTMLButtonElement>(null);
+
+  return <Button ref={buttonRef}>Click me</Button>;
+}
+```
+
+---
+
+## TypeScript with forwardRef
+
+### Basic Pattern
+
+```tsx
+// forwardRef<RefType, PropsType>
+const Input = forwardRef<HTMLInputElement, InputProps>(
+  function Input(props, ref) {
+    return <input ref={ref} {...props} />;
+  }
+);
+```
+
+### With Generic Props
+
+```tsx
+interface SelectProps<T> {
+  options: T[];
+  value: T;
+  onChange: (value: T) => void;
+  getLabel: (option: T) => string;
+}
+
+// Generic forwardRef requires type assertion
+function SelectInner<T>(
+  props: SelectProps<T>,
+  ref: React.ForwardedRef<HTMLSelectElement>
+) {
+  const { options, value, onChange, getLabel } = props;
+
+  return (
+    <select
+      ref={ref}
+      value={String(value)}
+      onChange={(e) => {
+        const selected = options.find(o => String(o) === e.target.value);
+        if (selected) onChange(selected);
+      }}
+    >
+      {options.map((option, i) => (
+        <option key={i} value={String(option)}>
+          {getLabel(option)}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+const Select = forwardRef(SelectInner) as <T>(
+  props: SelectProps<T> & { ref?: React.ForwardedRef<HTMLSelectElement> }
+) => React.ReactElement;
+```
+
+### Extracting Ref Type
+
+```tsx
+// Get the ref type from a forwardRef component
+type ButtonRef = React.ElementRef<typeof Button>;
+
+// Use in parent
+const ref = useRef<ButtonRef>(null);
+```
+
+---
+
+## useImperativeHandle
+
+Customize the ref value exposed to parent components:
+
+```tsx
+interface InputHandle {
+  focus: () => void;
+  clear: () => void;
+  getValue: () => string;
+}
+
+interface FancyInputProps {
+  defaultValue?: string;
+}
+
+const FancyInput = forwardRef<InputHandle, FancyInputProps>(
+  function FancyInput({ defaultValue = '' }, ref) {
+    const inputRef = useRef<HTMLInputElement>(null);
+
+    useImperativeHandle(ref, () => ({
+      focus: () => {
+        inputRef.current?.focus();
+      },
+      clear: () => {
+        if (inputRef.current) {
+          inputRef.current.value = '';
+        }
+      },
+      getValue: () => {
+        return inputRef.current?.value ?? '';
+      },
+    }), []);
+
+    return <input ref={inputRef} defaultValue={defaultValue} />;
+  }
+);
+
+// Usage
+function Form() {
+  const inputRef = useRef<InputHandle>(null);
+
+  const handleSubmit = () => {
+    const value = inputRef.current?.getValue();
+    console.log('Submitted:', value);
+    inputRef.current?.clear();
+  };
+
+  return (
+    <>
+      <FancyInput ref={inputRef} />
+      <button onClick={handleSubmit}>Submit</button>
+    </>
+  );
+}
+```
+
+<Callout type="warn" title="Use Sparingly">
+`useImperativeHandle` breaks the declarative model. Prefer props and callbacks. Only use when imperative access is truly necessary.
+</Callout>
+
+---
+
+## Exposing Methods
+
+### When to Expose Methods
+
+| Appropriate | Avoid |
+|-------------|-------|
+| Focus management | State changes |
+| Scroll to element | Data fetching |
+| Media playback | Animation triggers (prefer CSS) |
+| Measure dimensions | Validation |
+| Reset internal state | Form submission |
+
+### Complex Handle Example
+
+```tsx
+interface VideoPlayerHandle {
+  play: () => void;
+  pause: () => void;
+  seek: (time: number) => void;
+  getCurrentTime: () => number;
+}
+
+const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
+  function VideoPlayer({ src, onEnded }, ref) {
+    const videoRef = useRef<HTMLVideoElement>(null);
+
+    useImperativeHandle(ref, () => ({
+      play: () => {
+        videoRef.current?.play();
+      },
+      pause: () => {
+        videoRef.current?.pause();
+      },
+      seek: (time: number) => {
+        if (videoRef.current) {
+          videoRef.current.currentTime = time;
+        }
+      },
+      getCurrentTime: () => {
+        return videoRef.current?.currentTime ?? 0;
+      },
+    }), []);
+
+    return <video ref={videoRef} src={src} onEnded={onEnded} />;
+  }
+);
+```
+
+---
+
+## Ref Prop Naming
+
+### Standard `ref` Prop
+
+```tsx
+// Automatically forwarded with forwardRef
+const Button = forwardRef<HTMLButtonElement, ButtonProps>(
+  function Button(props, ref) {
+    return <button ref={ref} {...props} />;
+  }
+);
+
+<Button ref={buttonRef}>Click</Button>
+```
+
+### Custom Ref Props
+
+For multiple refs or clearer semantics:
+
+```tsx
+interface ScrollContainerProps {
+  children: React.ReactNode;
+  containerRef?: React.Ref<HTMLDivElement>;
+  contentRef?: React.Ref<HTMLDivElement>;
+}
+
+function ScrollContainer({ children, containerRef, contentRef }: ScrollContainerProps) {
+  return (
+    <div ref={containerRef} className="scroll-container">
+      <div ref={contentRef} className="scroll-content">
+        {children}
+      </div>
+    </div>
+  );
+}
+
+// Usage
+<ScrollContainer
+  containerRef={containerRef}
+  contentRef={contentRef}
+>
+  {content}
+</ScrollContainer>
+```
+
+<Callout type="info" title="Naming Convention">
+Use `ref` for the primary element. Use descriptive names like `inputRef`, `containerRef` for secondary refs.
+</Callout>
+
+---
+
+## When to Forward Refs
+
+### Forward When
+
+| Scenario | Reason |
+|----------|--------|
+| Reusable UI components | Parent may need DOM access |
+| Design system components | Flexibility for consumers |
+| Form input wrappers | Focus management, validation |
+| Components wrapping single element | Transparent behavior |
+
+### Skip When
+
+| Scenario | Reason |
+|----------|--------|
+| Container/layout components | No single element to ref |
+| Data-fetching components | No DOM to expose |
+| Orchestration components | Logic-only |
+| Components with complex DOM | Unclear what to expose |
+
+### Decision Flow
+
+```
+Does your component wrap a single DOM element?
+├── No → Don't forward ref
+└── Yes → Will consumers need DOM access?
+    ├── No → Don't forward ref
+    └── Yes → Forward ref
+```
+
+---
+
+## Common Mistakes
+
+### 1. Forgetting to Forward
+
+```tsx
+// Wrong: ref is silently dropped
+function Button({ children }: ButtonProps) {
+  return <button>{children}</button>;
+}
+
+// Right: ref is forwarded
+const Button = forwardRef<HTMLButtonElement, ButtonProps>(
+  function Button({ children }, ref) {
+    return <button ref={ref}>{children}</button>;
+  }
+);
+```
+
+### 2. Returning Wrong Element Ref
+
+```tsx
+// Wrong: forwarding outer div when input is expected
+const Input = forwardRef<HTMLInputElement, InputProps>(
+  function Input(props, ref) {
+    return (
+      <div ref={ref}> {/* Wrong element! */}
+        <input {...props} />
+      </div>
+    );
+  }
+);
+
+// Right: forward to the actual input
+const Input = forwardRef<HTMLInputElement, InputProps>(
+  function Input(props, ref) {
+    return (
+      <div className="input-wrapper">
+        <input ref={ref} {...props} />
+      </div>
+    );
+  }
+);
+```
+
+### 3. Missing Dependencies in useImperativeHandle
+
+```tsx
+// Wrong: stale closure
+useImperativeHandle(ref, () => ({
+  getValue: () => someValue, // someValue may be stale
+}), []); // Missing dependency
+
+// Right: include dependencies
+useImperativeHandle(ref, () => ({
+  getValue: () => someValue,
+}), [someValue]);
+```
+
+### 4. Exposing Too Much
+
+```tsx
+// Wrong: exposing entire DOM node
+useImperativeHandle(ref, () => inputRef.current!, []);
+
+// Right: expose only needed methods
+useImperativeHandle(ref, () => ({
+  focus: () => inputRef.current?.focus(),
+  blur: () => inputRef.current?.blur(),
+}), []);
+```
+
+### 5. Typing Errors
+
+```tsx
+// Wrong: props and ref order swapped in generic
+const Input = forwardRef<InputProps, HTMLInputElement>(...);
+
+// Right: ref type first, props second
+const Input = forwardRef<HTMLInputElement, InputProps>(...);
+```
+
+---
+
+## Alternatives to Ref Forwarding
+
+### Render Props
+
+```tsx
+interface RenderInputProps {
+  render: (inputProps: { ref: React.Ref<HTMLInputElement> }) => React.ReactNode;
+}
+
+function FormField({ render }: RenderInputProps) {
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  return (
+    <div className="form-field">
+      {render({ ref: inputRef })}
+    </div>
+  );
+}
+
+// Usage
+<FormField render={({ ref }) => <input ref={ref} />} />
+```
+
+### Callback Props
+
+```tsx
+interface InputProps {
+  onMount?: (element: HTMLInputElement) => void;
+}
+
+function Input({ onMount, ...props }: InputProps) {
+  const ref = useCallback((node: HTMLInputElement | null) => {
+    if (node) onMount?.(node);
+  }, [onMount]);
+
+  return <input ref={ref} {...props} />;
+}
+```

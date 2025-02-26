@@ -1,0 +1,559 @@
+---
+title: Fallback Patterns
+description: Designing effective fallback UIs for errors and loading states
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## Fallback UI Principles
+
+Fallback UIs appear when the primary content cannot be shown. Good fallbacks maintain context, provide actionable information, and match the surrounding design.
+
+---
+
+## Fallback UI Design
+
+### Basic Fallback Structure
+
+```tsx
+interface FallbackProps {
+  error: Error;
+  resetErrorBoundary: () => void;
+}
+
+function ErrorFallback({ error, resetErrorBoundary }: FallbackProps) {
+  return (
+    <div
+      role="alert"
+      className="error-fallback"
+      aria-live="assertive"
+    >
+      <div className="error-icon" aria-hidden="true">
+        {/* Icon */}
+      </div>
+      <h2>Unable to load content</h2>
+      <p>{getUserFriendlyMessage(error)}</p>
+      <button onClick={resetErrorBoundary}>
+        Try again
+      </button>
+    </div>
+  );
+}
+
+function getUserFriendlyMessage(error: Error): string {
+  if (error.message.includes('network')) {
+    return 'Please check your internet connection';
+  }
+  if (error.message.includes('timeout')) {
+    return 'The request took too long. Please try again.';
+  }
+  return 'Something unexpected happened';
+}
+```
+
+### Maintaining Visual Consistency
+
+```tsx
+// Fallback that matches the component's expected dimensions
+interface CardFallbackProps {
+  error: Error;
+  onRetry: () => void;
+}
+
+function CardErrorFallback({ error, onRetry }: CardFallbackProps) {
+  return (
+    <div className="card card-error">
+      <div className="card-body">
+        <p className="error-text">Failed to load</p>
+        <button className="card-button" onClick={onRetry}>
+          Retry
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Preserves card grid layout even when one card fails
+function CardGrid({ items }: { items: Item[] }) {
+  return (
+    <div className="card-grid">
+      {items.map(item => (
+        <ErrorBoundary
+          key={item.id}
+          fallbackRender={({ resetErrorBoundary }) => (
+            <CardErrorFallback
+              error={new Error('Card failed')}
+              onRetry={resetErrorBoundary}
+            />
+          )}
+        >
+          <Card item={item} />
+        </ErrorBoundary>
+      ))}
+    </div>
+  );
+}
+```
+
+---
+
+## Contextual Fallbacks
+
+### Inline Fallbacks
+
+For small, non-critical components:
+
+```tsx
+function InlineFallback() {
+  return (
+    <span className="inline-error">
+      Content unavailable
+    </span>
+  );
+}
+
+// Usage in a sentence or list
+function UserBadge({ userId }: { userId: string }) {
+  return (
+    <ErrorBoundary fallback={<InlineFallback />}>
+      <Badge userId={userId} />
+    </ErrorBoundary>
+  );
+}
+```
+
+### Widget Fallbacks
+
+For dashboard widgets or cards:
+
+```tsx
+interface WidgetFallbackProps {
+  title: string;
+  onRetry?: () => void;
+}
+
+function WidgetFallback({ title, onRetry }: WidgetFallbackProps) {
+  return (
+    <div className="widget widget-error">
+      <div className="widget-header">
+        <h3>{title}</h3>
+      </div>
+      <div className="widget-body">
+        <p>Unable to load {title.toLowerCase()}</p>
+        {onRetry && (
+          <button onClick={onRetry}>Refresh</button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Usage
+<ErrorBoundary
+  fallbackRender={({ resetErrorBoundary }) => (
+    <WidgetFallback
+      title="Sales Chart"
+      onRetry={resetErrorBoundary}
+    />
+  )}
+>
+  <SalesChart />
+</ErrorBoundary>
+```
+
+### Section Fallbacks
+
+For major page sections:
+
+```tsx
+function SectionFallback({
+  sectionName,
+  onRetry,
+}: {
+  sectionName: string;
+  onRetry: () => void;
+}) {
+  return (
+    <section className="section section-error">
+      <div className="section-content">
+        <h2>{sectionName} unavailable</h2>
+        <p>We encountered an issue loading this section.</p>
+        <div className="section-actions">
+          <button onClick={onRetry}>Try again</button>
+          <button onClick={() => window.location.reload()}>
+            Reload page
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+}
+```
+
+---
+
+## Full Page vs Component Fallback
+
+### Full Page Fallback
+
+```tsx
+function FullPageError({
+  error,
+  resetErrorBoundary,
+}: FallbackProps) {
+  return (
+    <div className="full-page-error">
+      <div className="error-content">
+        <h1>Oops! Something went wrong</h1>
+        <p>We're sorry for the inconvenience.</p>
+
+        <div className="error-actions">
+          <button onClick={resetErrorBoundary}>
+            Try again
+          </button>
+          <a href="/">Return to home</a>
+        </div>
+
+        <details>
+          <summary>Technical details</summary>
+          <pre>{error.message}</pre>
+        </details>
+      </div>
+    </div>
+  );
+}
+```
+
+### When to Use Each
+
+| Fallback Type | Use Case | Example |
+|---------------|----------|---------|
+| **Inline** | Non-critical, small UI elements | User avatar, badge |
+| **Component** | Independent features | Widget, card, form section |
+| **Section** | Major page areas | Sidebar, main content area |
+| **Full page** | Critical failures, route errors | App crash, auth failure |
+
+```tsx
+function App() {
+  return (
+    // Full page fallback for catastrophic errors
+    <ErrorBoundary fallback={<FullPageError />}>
+      <Layout>
+        {/* Section fallback for header */}
+        <ErrorBoundary fallback={<SimpleHeader />}>
+          <Header />
+        </ErrorBoundary>
+
+        <main>
+          {/* Component fallbacks for features */}
+          <ErrorBoundary fallback={<WidgetFallback title="Stats" />}>
+            <StatsWidget />
+          </ErrorBoundary>
+        </main>
+      </Layout>
+    </ErrorBoundary>
+  );
+}
+```
+
+---
+
+## Development vs Production Fallbacks
+
+### Environment-Aware Fallbacks
+
+```tsx
+interface DevFallbackProps {
+  error: Error;
+  componentStack?: string;
+  resetErrorBoundary: () => void;
+}
+
+function DevelopmentFallback({
+  error,
+  componentStack,
+  resetErrorBoundary,
+}: DevFallbackProps) {
+  return (
+    <div className="dev-error">
+      <h2>Development Error</h2>
+      <div className="error-details">
+        <h3>{error.name}: {error.message}</h3>
+        <pre className="stack-trace">{error.stack}</pre>
+        {componentStack && (
+          <>
+            <h4>Component Stack:</h4>
+            <pre className="component-stack">{componentStack}</pre>
+          </>
+        )}
+      </div>
+      <button onClick={resetErrorBoundary}>Retry</button>
+    </div>
+  );
+}
+
+function ProductionFallback({
+  resetErrorBoundary,
+}: {
+  resetErrorBoundary: () => void;
+}) {
+  return (
+    <div className="prod-error">
+      <h2>Something went wrong</h2>
+      <p>Please try again or contact support if the problem persists.</p>
+      <button onClick={resetErrorBoundary}>Try again</button>
+    </div>
+  );
+}
+
+// Auto-select based on environment
+function ErrorFallback(props: DevFallbackProps) {
+  if (process.env.NODE_ENV === 'development') {
+    return <DevelopmentFallback {...props} />;
+  }
+  return <ProductionFallback resetErrorBoundary={props.resetErrorBoundary} />;
+}
+```
+
+<Callout type="warn" title="Security Warning">
+Never expose stack traces or detailed error messages in production. They may reveal implementation details to attackers.
+</Callout>
+
+---
+
+## Suspense Fallbacks
+
+### Loading States with Suspense
+
+```tsx
+import { Suspense, lazy } from 'react';
+
+const HeavyComponent = lazy(() => import('./HeavyComponent'));
+
+function App() {
+  return (
+    <Suspense fallback={<LoadingSkeleton />}>
+      <HeavyComponent />
+    </Suspense>
+  );
+}
+
+function LoadingSkeleton() {
+  return (
+    <div className="skeleton" aria-busy="true" aria-live="polite">
+      <div className="skeleton-header" />
+      <div className="skeleton-body">
+        <div className="skeleton-line" />
+        <div className="skeleton-line" />
+        <div className="skeleton-line short" />
+      </div>
+    </div>
+  );
+}
+```
+
+### Nested Suspense Boundaries
+
+```tsx
+function Dashboard() {
+  return (
+    <div className="dashboard">
+      {/* Independent loading states */}
+      <Suspense fallback={<ChartSkeleton />}>
+        <Chart />
+      </Suspense>
+
+      <Suspense fallback={<TableSkeleton />}>
+        <DataTable />
+      </Suspense>
+
+      {/* Grouped loading state */}
+      <Suspense fallback={<WidgetsSkeleton />}>
+        <Widget1 />
+        <Widget2 />
+        <Widget3 />
+      </Suspense>
+    </div>
+  );
+}
+```
+
+---
+
+## Loading vs Error Fallbacks
+
+### Combined Handling
+
+```tsx
+interface AsyncBoundaryProps {
+  children: ReactNode;
+  loadingFallback: ReactNode;
+  errorFallback: ReactNode | ((props: FallbackProps) => ReactNode);
+}
+
+function AsyncBoundary({
+  children,
+  loadingFallback,
+  errorFallback,
+}: AsyncBoundaryProps) {
+  return (
+    <ErrorBoundary
+      fallbackRender={
+        typeof errorFallback === 'function'
+          ? errorFallback
+          : () => errorFallback
+      }
+    >
+      <Suspense fallback={loadingFallback}>
+        {children}
+      </Suspense>
+    </ErrorBoundary>
+  );
+}
+
+// Usage
+<AsyncBoundary
+  loadingFallback={<TableSkeleton />}
+  errorFallback={<TableError />}
+>
+  <DataTable />
+</AsyncBoundary>
+```
+
+### State Comparison
+
+| State | Cause | User Experience |
+|-------|-------|-----------------|
+| **Loading** | Fetching data, lazy loading | Show progress indicator |
+| **Error** | Network failure, code error | Show error with recovery |
+| **Empty** | No data available | Show empty state message |
+
+### Complete State Handling
+
+```tsx
+interface DataState<T> {
+  data: T | null;
+  isLoading: boolean;
+  error: Error | null;
+}
+
+function DataDisplay<T>({
+  state,
+  loadingFallback,
+  errorFallback,
+  emptyFallback,
+  children,
+}: {
+  state: DataState<T>;
+  loadingFallback: ReactNode;
+  errorFallback: (error: Error) => ReactNode;
+  emptyFallback: ReactNode;
+  children: (data: T) => ReactNode;
+}) {
+  if (state.isLoading) {
+    return <>{loadingFallback}</>;
+  }
+
+  if (state.error) {
+    return <>{errorFallback(state.error)}</>;
+  }
+
+  if (!state.data) {
+    return <>{emptyFallback}</>;
+  }
+
+  return <>{children(state.data)}</>;
+}
+
+// Usage
+<DataDisplay
+  state={usersState}
+  loadingFallback={<UserListSkeleton />}
+  errorFallback={(error) => <UserListError error={error} />}
+  emptyFallback={<NoUsersMessage />}
+>
+  {(users) => <UserList users={users} />}
+</DataDisplay>
+```
+
+---
+
+## Fallback Patterns Comparison
+
+| Pattern | Use Case | Pros | Cons |
+|---------|----------|------|------|
+| **Static text** | Simple errors | Easy to implement | Not informative |
+| **Skeleton** | Loading states | Preserves layout | Requires design effort |
+| **Empty state** | No data | Clear messaging | Can feel empty |
+| **Retry button** | Recoverable errors | User control | Requires action |
+| **Degraded UI** | Partial failures | Maintains function | Complex logic |
+| **Full page** | Critical errors | Clear interruption | Blocks all content |
+
+---
+
+## Accessibility Considerations
+
+```tsx
+function AccessibleFallback({
+  error,
+  resetErrorBoundary,
+}: FallbackProps) {
+  return (
+    <div
+      role="alert"
+      aria-live="assertive"
+      className="error-fallback"
+    >
+      <h2 id="error-title">Error loading content</h2>
+      <p id="error-description" aria-describedby="error-title">
+        {error.message}
+      </p>
+      <button
+        onClick={resetErrorBoundary}
+        aria-label="Retry loading content"
+      >
+        Try again
+      </button>
+    </div>
+  );
+}
+
+function AccessibleLoadingFallback() {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      aria-busy="true"
+      className="loading-fallback"
+    >
+      <span className="sr-only">Loading content...</span>
+      <div className="spinner" aria-hidden="true" />
+    </div>
+  );
+}
+```
+
+<Callout type="info" title="Accessibility Tips">
+- Use `role="alert"` for errors and `role="status"` for loading
+- Add `aria-live` to announce changes to screen readers
+- Provide text alternatives for visual indicators
+- Ensure retry buttons are keyboard accessible
+</Callout>
+
+---
+
+## Best Practices
+
+### Do
+
+- Match fallback dimensions to actual content
+- Provide clear, actionable messages
+- Include recovery options when possible
+- Test fallbacks across all breakpoints
+
+### Don't
+
+- Show technical errors to users in production
+- Use generic "Error" messages without context
+- Forget about empty states
+- Block the entire app for non-critical errors

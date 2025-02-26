@@ -1,0 +1,490 @@
+---
+title: Cleanup Patterns
+description: Proper cleanup patterns in React effects to prevent memory leaks and stale state
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## Cleanup Function Basics
+
+The cleanup function runs before the effect re-runs and when the component unmounts.
+
+```tsx
+import { useEffect } from 'react';
+
+function Component() {
+  useEffect(() => {
+    // Setup: runs after render
+    const connection = createConnection();
+    connection.connect();
+
+    // Cleanup: runs before next effect and on unmount
+    return () => {
+      connection.disconnect();
+    };
+  }, []);
+}
+```
+
+### Cleanup Lifecycle
+
+```tsx
+// Component mounts
+// 1. Effect runs: setup
+
+// Dependency changes
+// 2. Cleanup runs (previous effect)
+// 3. Effect runs: setup (new effect)
+
+// Component unmounts
+// 4. Cleanup runs (final cleanup)
+```
+
+<Callout type="info">
+Cleanup functions prevent memory leaks, stale subscriptions, and state updates on unmounted components.
+</Callout>
+
+---
+
+## Event Listener Cleanup
+
+Always remove event listeners you add.
+
+```tsx
+import { useEffect } from 'react';
+
+function WindowSize() {
+  const [size, setSize] = useState({ width: 0, height: 0 });
+
+  useEffect(() => {
+    const handleResize = () => {
+      setSize({ width: window.innerWidth, height: window.innerHeight });
+    };
+
+    // Initial size
+    handleResize();
+
+    // Add listener
+    window.addEventListener('resize', handleResize);
+
+    // Remove listener on cleanup
+    return () => {
+      window.removeEventListener('resize', handleResize);
+    };
+  }, []);
+
+  return <div>{size.width} x {size.height}</div>;
+}
+```
+
+### Multiple Event Listeners
+
+```tsx
+function KeyboardShortcuts({ onSave, onUndo }: Props) {
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.metaKey && e.key === 's') {
+        e.preventDefault();
+        onSave();
+      }
+      if (e.metaKey && e.key === 'z') {
+        e.preventDefault();
+        onUndo();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [onSave, onUndo]);
+}
+```
+
+### Event Listener on Ref Element
+
+```tsx
+function DraggableBox() {
+  const boxRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const box = boxRef.current;
+    if (!box) return;
+
+    const handleDragStart = (e: DragEvent) => {
+      // Handle drag
+    };
+
+    box.addEventListener('dragstart', handleDragStart);
+
+    return () => {
+      box.removeEventListener('dragstart', handleDragStart);
+    };
+  }, []);
+
+  return <div ref={boxRef} draggable>Drag me</div>;
+}
+```
+
+---
+
+## Timer Cleanup
+
+Clear timeouts and intervals to prevent memory leaks.
+
+### setTimeout Cleanup
+
+```tsx
+import { useEffect } from 'react';
+
+function DelayedMessage({ message, delay }: Props) {
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      setVisible(true);
+    }, delay);
+
+    return () => {
+      clearTimeout(timeoutId);
+    };
+  }, [delay]);
+
+  return visible ? <div>{message}</div> : null;
+}
+```
+
+### setInterval Cleanup
+
+```tsx
+function Clock() {
+  const [time, setTime] = useState(new Date());
+
+  useEffect(() => {
+    const intervalId = setInterval(() => {
+      setTime(new Date());
+    }, 1000);
+
+    return () => {
+      clearInterval(intervalId);
+    };
+  }, []);
+
+  return <div>{time.toLocaleTimeString()}</div>;
+}
+```
+
+### Chained Timeouts
+
+```tsx
+function AnimationSequence() {
+  const [step, setStep] = useState(0);
+
+  useEffect(() => {
+    if (step >= 3) return;
+
+    const timeoutId = setTimeout(() => {
+      setStep(s => s + 1);
+    }, 1000);
+
+    return () => clearTimeout(timeoutId);
+  }, [step]);
+
+  return <div>Step: {step}</div>;
+}
+```
+
+<Callout type="warn">
+Always capture timer IDs and clear them. Uncleaned timers cause state updates on unmounted components.
+</Callout>
+
+---
+
+## AbortController Cleanup
+
+Cancel fetch requests when component unmounts or dependencies change.
+
+```tsx
+import { useEffect, useState } from 'react';
+
+function UserProfile({ userId }: { userId: string }) {
+  const [user, setUser] = useState<User | null>(null);
+  const [error, setError] = useState<Error | null>(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    const fetchUser = async () => {
+      try {
+        const response = await fetch(`/api/users/${userId}`, {
+          signal: controller.signal,
+        });
+        const data = await response.json();
+        setUser(data);
+      } catch (err) {
+        if (err instanceof Error && err.name === 'AbortError') {
+          // Request was cancelled, ignore
+          return;
+        }
+        setError(err instanceof Error ? err : new Error('Unknown error'));
+      }
+    };
+
+    fetchUser();
+
+    return () => {
+      controller.abort();
+    };
+  }, [userId]);
+
+  if (error) return <div>Error: {error.message}</div>;
+  return <div>{user?.name}</div>;
+}
+```
+
+### Multiple Fetch Requests
+
+```tsx
+function Dashboard({ userId }: { userId: string }) {
+  const [data, setData] = useState<DashboardData | null>(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    const fetchAll = async () => {
+      try {
+        const [userRes, statsRes, notificationsRes] = await Promise.all([
+          fetch(`/api/users/${userId}`, { signal: controller.signal }),
+          fetch(`/api/users/${userId}/stats`, { signal: controller.signal }),
+          fetch(`/api/users/${userId}/notifications`, { signal: controller.signal }),
+        ]);
+
+        const [user, stats, notifications] = await Promise.all([
+          userRes.json(),
+          statsRes.json(),
+          notificationsRes.json(),
+        ]);
+
+        setData({ user, stats, notifications });
+      } catch (err) {
+        if (err instanceof Error && err.name !== 'AbortError') {
+          console.error(err);
+        }
+      }
+    };
+
+    fetchAll();
+
+    return () => controller.abort();
+  }, [userId]);
+
+  return <div>{/* render data */}</div>;
+}
+```
+
+---
+
+## Subscription Cleanup
+
+Clean up subscriptions to external data sources.
+
+### Basic Subscription Pattern
+
+```tsx
+function StockPrice({ symbol }: { symbol: string }) {
+  const [price, setPrice] = useState<number | null>(null);
+
+  useEffect(() => {
+    const subscription = stockService.subscribe(symbol, (newPrice) => {
+      setPrice(newPrice);
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [symbol]);
+
+  return <div>{symbol}: ${price}</div>;
+}
+```
+
+### Observable Pattern
+
+```tsx
+function DataStream({ streamId }: { streamId: string }) {
+  const [data, setData] = useState<StreamData[]>([]);
+
+  useEffect(() => {
+    const observable = createDataStream(streamId);
+
+    const subscription = observable.subscribe({
+      next: (value) => setData(prev => [...prev, value]),
+      error: (err) => console.error(err),
+      complete: () => console.log('Stream complete'),
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [streamId]);
+
+  return <ul>{data.map((d, i) => <li key={i}>{d.value}</li>)}</ul>;
+}
+```
+
+---
+
+## Ref Cleanup
+
+React 19 introduced cleanup functions for refs.
+
+### Ref Callback with Cleanup (React 19+)
+
+```tsx
+function MeasuredBox() {
+  const [height, setHeight] = useState(0);
+
+  const measureRef = useCallback((node: HTMLDivElement | null) => {
+    if (node) {
+      setHeight(node.getBoundingClientRect().height);
+
+      const observer = new ResizeObserver((entries) => {
+        setHeight(entries[0].contentRect.height);
+      });
+      observer.observe(node);
+
+      // Cleanup function (React 19+)
+      return () => {
+        observer.disconnect();
+      };
+    }
+  }, []);
+
+  return <div ref={measureRef}>Content</div>;
+}
+```
+
+### Pre-React 19 Pattern
+
+```tsx
+function MeasuredBox() {
+  const [height, setHeight] = useState(0);
+  const observerRef = useRef<ResizeObserver | null>(null);
+
+  const measureRef = useCallback((node: HTMLDivElement | null) => {
+    // Cleanup previous observer
+    if (observerRef.current) {
+      observerRef.current.disconnect();
+      observerRef.current = null;
+    }
+
+    if (node) {
+      setHeight(node.getBoundingClientRect().height);
+
+      observerRef.current = new ResizeObserver((entries) => {
+        setHeight(entries[0].contentRect.height);
+      });
+      observerRef.current.observe(node);
+    }
+  }, []);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      observerRef.current?.disconnect();
+    };
+  }, []);
+
+  return <div ref={measureRef}>Content</div>;
+}
+```
+
+---
+
+## Strict Mode Double-Invoke
+
+React Strict Mode invokes effects twice in development to catch cleanup bugs.
+
+### What Happens in Strict Mode
+
+```tsx
+// Development with StrictMode:
+// 1. Component mounts
+// 2. Effect runs (setup)
+// 3. Effect cleanup runs
+// 4. Effect runs again (setup)
+
+// Production:
+// 1. Component mounts
+// 2. Effect runs (setup)
+```
+
+### Testing Your Cleanup
+
+```tsx
+function ChatConnection({ roomId }: { roomId: string }) {
+  useEffect(() => {
+    console.log('Connecting to', roomId);
+    const connection = connect(roomId);
+
+    return () => {
+      console.log('Disconnecting from', roomId);
+      connection.disconnect();
+    };
+  }, [roomId]);
+}
+
+// In StrictMode, you'll see:
+// "Connecting to room1"
+// "Disconnecting from room1"
+// "Connecting to room1"
+```
+
+<Callout type="info">
+If your effect breaks in Strict Mode, your cleanup is incomplete. The effect should work correctly when run twice.
+</Callout>
+
+### Common Strict Mode Issues
+
+| Issue | Cause | Fix |
+|-------|-------|-----|
+| Double API calls | No AbortController | Add abort cleanup |
+| Duplicate subscriptions | Missing unsubscribe | Return cleanup function |
+| Memory leaks | Timer not cleared | Clear timeout/interval |
+| Stale closures | Effect depends on ref | Use ref callback or dependency |
+
+### Idempotent Effects
+
+Make effects safe to run multiple times.
+
+```tsx
+// Not idempotent: adds multiple listeners
+useEffect(() => {
+  document.body.classList.add('modal-open');
+  // Missing: classList.remove in cleanup
+});
+
+// Idempotent: cleanup ensures correct state
+useEffect(() => {
+  document.body.classList.add('modal-open');
+  return () => {
+    document.body.classList.remove('modal-open');
+  };
+}, []);
+```
+
+---
+
+## Cleanup Checklist
+
+| Resource Type | Cleanup Method |
+|---------------|----------------|
+| Event listeners | `removeEventListener` |
+| Timers | `clearTimeout` / `clearInterval` |
+| Fetch requests | `AbortController.abort()` |
+| WebSocket | `socket.close()` |
+| Subscriptions | `subscription.unsubscribe()` |
+| Observers | `observer.disconnect()` |
+| Animation frames | `cancelAnimationFrame` |
+| Third-party SDK | SDK cleanup method |

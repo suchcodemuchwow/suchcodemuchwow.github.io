@@ -1,0 +1,551 @@
+---
+title: List Patterns
+description: Common patterns for rendering lists in React
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## Basic List Rendering
+
+The fundamental pattern for rendering lists uses `map()`:
+
+```tsx
+interface User {
+  id: string;
+  name: string;
+  email: string;
+}
+
+function UserList({ users }: { users: User[] }) {
+  return (
+    <ul>
+      {users.map(user => (
+        <li key={user.id}>
+          {user.name} - {user.email}
+        </li>
+      ))}
+    </ul>
+  );
+}
+```
+
+### Extracting List Items
+
+For complex items, extract to a component:
+
+```tsx
+interface UserItemProps {
+  user: User;
+  onSelect: (id: string) => void;
+}
+
+function UserItem({ user, onSelect }: UserItemProps) {
+  return (
+    <li onClick={() => onSelect(user.id)}>
+      <span className="name">{user.name}</span>
+      <span className="email">{user.email}</span>
+    </li>
+  );
+}
+
+function UserList({ users, onSelect }: Props) {
+  return (
+    <ul>
+      {users.map(user => (
+        <UserItem key={user.id} user={user} onSelect={onSelect} />
+      ))}
+    </ul>
+  );
+}
+```
+
+---
+
+## Nested Lists
+
+### Simple Nesting
+
+```tsx
+interface Category {
+  id: string;
+  name: string;
+  items: Item[];
+}
+
+function CategoryList({ categories }: { categories: Category[] }) {
+  return (
+    <div>
+      {categories.map(category => (
+        <section key={category.id}>
+          <h2>{category.name}</h2>
+          <ul>
+            {category.items.map(item => (
+              <li key={item.id}>{item.name}</li>
+            ))}
+          </ul>
+        </section>
+      ))}
+    </div>
+  );
+}
+```
+
+### Recursive Lists (Tree Structure)
+
+```tsx
+interface TreeNode {
+  id: string;
+  label: string;
+  children?: TreeNode[];
+}
+
+function TreeView({ nodes }: { nodes: TreeNode[] }) {
+  return (
+    <ul>
+      {nodes.map(node => (
+        <TreeItem key={node.id} node={node} />
+      ))}
+    </ul>
+  );
+}
+
+function TreeItem({ node }: { node: TreeNode }) {
+  const [expanded, setExpanded] = useState(false);
+  const hasChildren = node.children && node.children.length > 0;
+
+  return (
+    <li>
+      <div onClick={() => hasChildren && setExpanded(!expanded)}>
+        {hasChildren && <span>{expanded ? '▼' : '▶'}</span>}
+        {node.label}
+      </div>
+      {expanded && hasChildren && (
+        <TreeView nodes={node.children!} />
+      )}
+    </li>
+  );
+}
+```
+
+<Callout type="warn" title="Deep Nesting">
+Deeply nested lists can cause performance issues. Consider virtualization or pagination for trees with many nodes.
+</Callout>
+
+---
+
+## List with Different Item Types
+
+### Discriminated Union Pattern
+
+```tsx
+type FeedItem =
+  | { type: 'post'; id: string; title: string; body: string }
+  | { type: 'image'; id: string; src: string; alt: string }
+  | { type: 'video'; id: string; url: string; duration: number };
+
+function FeedItemComponent({ item }: { item: FeedItem }) {
+  switch (item.type) {
+    case 'post':
+      return <article><h3>{item.title}</h3><p>{item.body}</p></article>;
+    case 'image':
+      return <img src={item.src} alt={item.alt} />;
+    case 'video':
+      return <video src={item.url} />;
+  }
+}
+
+function Feed({ items }: { items: FeedItem[] }) {
+  return (
+    <div>
+      {items.map(item => (
+        <FeedItemComponent key={item.id} item={item} />
+      ))}
+    </div>
+  );
+}
+```
+
+### Component Map Pattern
+
+```tsx
+const itemComponents: Record<FeedItem['type'], ComponentType<{ item: FeedItem }>> = {
+  post: PostItem,
+  image: ImageItem,
+  video: VideoItem,
+};
+
+function Feed({ items }: { items: FeedItem[] }) {
+  return (
+    <div>
+      {items.map(item => {
+        const Component = itemComponents[item.type];
+        return <Component key={item.id} item={item} />;
+      })}
+    </div>
+  );
+}
+```
+
+---
+
+## Empty List Handling
+
+### Basic Empty State
+
+```tsx
+function UserList({ users }: { users: User[] }) {
+  if (users.length === 0) {
+    return <p>No users found.</p>;
+  }
+
+  return (
+    <ul>
+      {users.map(user => (
+        <UserItem key={user.id} user={user} />
+      ))}
+    </ul>
+  );
+}
+```
+
+### Reusable Empty State Component
+
+```tsx
+interface ListProps<T> {
+  items: T[];
+  renderItem: (item: T) => ReactNode;
+  getKey: (item: T) => string;
+  emptyMessage?: string;
+  emptyAction?: ReactNode;
+}
+
+function List<T>({
+  items,
+  renderItem,
+  getKey,
+  emptyMessage = 'No items',
+  emptyAction
+}: ListProps<T>) {
+  if (items.length === 0) {
+    return (
+      <div className="empty-state">
+        <p>{emptyMessage}</p>
+        {emptyAction}
+      </div>
+    );
+  }
+
+  return (
+    <ul>
+      {items.map(item => (
+        <li key={getKey(item)}>{renderItem(item)}</li>
+      ))}
+    </ul>
+  );
+}
+
+// Usage
+<List
+  items={users}
+  renderItem={user => <UserCard user={user} />}
+  getKey={user => user.id}
+  emptyMessage="No users yet"
+  emptyAction={<button onClick={inviteUser}>Invite User</button>}
+/>
+```
+
+### Different Empty States
+
+```tsx
+interface ListState {
+  items: User[];
+  isLoading: boolean;
+  error: Error | null;
+  hasSearched: boolean;
+}
+
+function UserList({ items, isLoading, error, hasSearched }: ListState) {
+  if (isLoading) {
+    return <Skeleton count={5} />;
+  }
+
+  if (error) {
+    return <ErrorMessage error={error} />;
+  }
+
+  if (items.length === 0) {
+    return hasSearched
+      ? <p>No results match your search</p>
+      : <p>No users yet. Add your first user.</p>;
+  }
+
+  return <ul>{/* render items */}</ul>;
+}
+```
+
+---
+
+## List Headers and Footers
+
+### Static Header/Footer
+
+```tsx
+function ProductList({ products }: { products: Product[] }) {
+  return (
+    <div className="product-list">
+      <header className="list-header">
+        <h2>Products ({products.length})</h2>
+        <SortDropdown />
+      </header>
+
+      <ul>
+        {products.map(product => (
+          <ProductItem key={product.id} product={product} />
+        ))}
+      </ul>
+
+      <footer className="list-footer">
+        <p>Showing {products.length} products</p>
+      </footer>
+    </div>
+  );
+}
+```
+
+### Sticky Header Pattern
+
+```tsx
+function ScrollableList({ items }: { items: Item[] }) {
+  return (
+    <div className="scrollable-container">
+      <div className="sticky-header">
+        <span>Name</span>
+        <span>Status</span>
+        <span>Actions</span>
+      </div>
+      <div className="scroll-area">
+        {items.map(item => (
+          <ListRow key={item.id} item={item} />
+        ))}
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+## Grouped Lists
+
+### Group by Property
+
+```tsx
+interface Task {
+  id: string;
+  title: string;
+  status: 'todo' | 'in-progress' | 'done';
+}
+
+function groupBy<T>(items: T[], key: keyof T): Record<string, T[]> {
+  return items.reduce((groups, item) => {
+    const value = String(item[key]);
+    return {
+      ...groups,
+      [value]: [...(groups[value] || []), item],
+    };
+  }, {} as Record<string, T[]>);
+}
+
+function TaskBoard({ tasks }: { tasks: Task[] }) {
+  const grouped = groupBy(tasks, 'status');
+
+  return (
+    <div className="board">
+      {Object.entries(grouped).map(([status, statusTasks]) => (
+        <section key={status}>
+          <h3>{status} ({statusTasks.length})</h3>
+          <ul>
+            {statusTasks.map(task => (
+              <TaskItem key={task.id} task={task} />
+            ))}
+          </ul>
+        </section>
+      ))}
+    </div>
+  );
+}
+```
+
+### Alphabetical Grouping
+
+```tsx
+function ContactList({ contacts }: { contacts: Contact[] }) {
+  const sorted = [...contacts].sort((a, b) =>
+    a.name.localeCompare(b.name)
+  );
+
+  const grouped = sorted.reduce((acc, contact) => {
+    const letter = contact.name[0].toUpperCase();
+    return {
+      ...acc,
+      [letter]: [...(acc[letter] || []), contact],
+    };
+  }, {} as Record<string, Contact[]>);
+
+  return (
+    <div>
+      {Object.entries(grouped).map(([letter, letterContacts]) => (
+        <section key={letter}>
+          <h2 className="letter-header">{letter}</h2>
+          {letterContacts.map(contact => (
+            <ContactItem key={contact.id} contact={contact} />
+          ))}
+        </section>
+      ))}
+    </div>
+  );
+}
+```
+
+### Date Grouping
+
+```tsx
+function formatDateGroup(date: Date): string {
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+
+  if (date.toDateString() === today.toDateString()) return 'Today';
+  if (date.toDateString() === yesterday.toDateString()) return 'Yesterday';
+  return date.toLocaleDateString();
+}
+
+function MessageList({ messages }: { messages: Message[] }) {
+  const grouped = messages.reduce((acc, message) => {
+    const group = formatDateGroup(new Date(message.timestamp));
+    return {
+      ...acc,
+      [group]: [...(acc[group] || []), message],
+    };
+  }, {} as Record<string, Message[]>);
+
+  return (
+    <div>
+      {Object.entries(grouped).map(([date, dateMessages]) => (
+        <div key={date}>
+          <div className="date-divider">{date}</div>
+          {dateMessages.map(message => (
+            <MessageItem key={message.id} message={message} />
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+```
+
+---
+
+## Infinite Lists Basics
+
+### Load More Pattern
+
+```tsx
+interface UsePaginatedListResult<T> {
+  items: T[];
+  isLoading: boolean;
+  hasMore: boolean;
+  loadMore: () => void;
+}
+
+function InfiniteList<T extends { id: string }>({
+  items,
+  isLoading,
+  hasMore,
+  loadMore,
+  renderItem,
+}: UsePaginatedListResult<T> & { renderItem: (item: T) => ReactNode }) {
+  return (
+    <div>
+      <ul>
+        {items.map(item => (
+          <li key={item.id}>{renderItem(item)}</li>
+        ))}
+      </ul>
+
+      {isLoading && <LoadingSpinner />}
+
+      {hasMore && !isLoading && (
+        <button onClick={loadMore}>Load More</button>
+      )}
+
+      {!hasMore && items.length > 0 && (
+        <p>No more items</p>
+      )}
+    </div>
+  );
+}
+```
+
+### Intersection Observer Pattern
+
+```tsx
+function useIntersectionObserver(
+  callback: () => void,
+  options?: IntersectionObserverInit
+) {
+  const targetRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const target = targetRef.current;
+    if (!target) return;
+
+    const observer = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting) {
+        callback();
+      }
+    }, options);
+
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [callback, options]);
+
+  return targetRef;
+}
+
+function InfiniteScrollList({ fetchMore, hasMore }: Props) {
+  const sentinelRef = useIntersectionObserver(
+    () => {
+      if (hasMore) fetchMore();
+    },
+    { threshold: 0.1 }
+  );
+
+  return (
+    <div>
+      <ul>{/* items */}</ul>
+      {hasMore && <div ref={sentinelRef} className="sentinel" />}
+    </div>
+  );
+}
+```
+
+<Callout type="info" title="Performance">
+For lists with thousands of items, combine infinite loading with virtualization (covered in the Virtualization doc) for optimal performance.
+</Callout>
+
+---
+
+## Quick Reference
+
+| Pattern | Use Case |
+|---------|----------|
+| Basic map | Simple homogeneous lists |
+| Extracted item component | Complex item rendering |
+| Nested lists | Hierarchical data |
+| Recursive component | Tree structures |
+| Discriminated union | Multiple item types |
+| Component map | Extensible item types |
+| Empty state | User feedback |
+| Grouped lists | Categorized data |
+| Infinite scroll | Large datasets |

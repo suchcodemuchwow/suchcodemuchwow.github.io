@@ -1,0 +1,317 @@
+---
+title: XSS Prevention
+description: Protect React applications from Cross-Site Scripting attacks
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## React's Built-in Escaping
+
+React automatically escapes values embedded in JSX before rendering them to the DOM. This prevents most XSS attacks by default.
+
+```tsx
+function UserGreeting({ username }: { username: string }) {
+  // Safe: React escapes the username automatically
+  return <div>Hello, {username}!</div>;
+}
+
+// Even malicious input is rendered as text
+<UserGreeting username="<script>alert('xss')</script>" />
+// Renders: Hello, &lt;script&gt;alert('xss')&lt;/script&gt;!
+```
+
+### What React Escapes
+
+| Context | Escaped | Example |
+|---------|---------|---------|
+| Text content | Yes | `<div>{userInput}</div>` |
+| Attribute values | Yes | `<input value={userInput} />` |
+| `dangerouslySetInnerHTML` | No | `<div dangerouslySetInnerHTML={{__html: userInput}} />` |
+| `href` with `javascript:` | No | `<a href={userInput}>` |
+| Event handlers | No | `<div onClick={userInput}>` |
+
+---
+
+## When XSS Can Still Happen
+
+### 1. dangerouslySetInnerHTML
+
+```tsx
+// VULNERABLE: Never use with untrusted input
+function Comment({ html }: { html: string }) {
+  return <div dangerouslySetInnerHTML={{ __html: html }} />;
+}
+
+// Attacker input: <img src=x onerror="alert('xss')">
+```
+
+### 2. URL Injection
+
+```tsx
+// VULNERABLE: javascript: URLs execute code
+function UserLink({ url }: { url: string }) {
+  return <a href={url}>Click me</a>;
+}
+
+// Attacker input: javascript:alert('xss')
+```
+
+### 3. Dynamic Script Creation
+
+```tsx
+// VULNERABLE: Creating script elements bypasses React's protection
+function LoadScript({ src }: { src: string }) {
+  useEffect(() => {
+    const script = document.createElement('script');
+    script.src = src; // Untrusted source
+    document.body.appendChild(script);
+  }, [src]);
+
+  return null;
+}
+```
+
+---
+
+## URL Injection Prevention
+
+```tsx
+function SafeLink({ url, children }: { url: string; children: React.ReactNode }) {
+  const isSafeUrl = (href: string): boolean => {
+    try {
+      const parsed = new URL(href, window.location.origin);
+      return ['http:', 'https:', 'mailto:'].includes(parsed.protocol);
+    } catch {
+      return false;
+    }
+  };
+
+  if (!isSafeUrl(url)) {
+    return <span>{children}</span>;
+  }
+
+  return <a href={url}>{children}</a>;
+}
+```
+
+### URL Validation Patterns
+
+| Protocol | Safe | Use Case |
+|----------|------|----------|
+| `http:` | Yes | External links |
+| `https:` | Yes | Secure external links |
+| `mailto:` | Yes | Email links |
+| `tel:` | Conditional | Phone links (validate format) |
+| `javascript:` | No | Never allow |
+| `data:` | No | Can execute scripts |
+| `vbscript:` | No | IE-specific attack vector |
+
+<Callout type="warn">
+Always validate URLs on both client and server. Client-side validation can be bypassed.
+</Callout>
+
+---
+
+## Event Handler Injection
+
+```tsx
+// VULNERABLE: Dynamic event handler from string
+function BadButton({ handler }: { handler: string }) {
+  return <button onClick={() => eval(handler)}>Click</button>;
+}
+
+// SAFE: Use predefined actions
+type Action = 'submit' | 'cancel' | 'delete';
+
+function SafeButton({
+  action,
+  onAction
+}: {
+  action: Action;
+  onAction: (action: Action) => void;
+}) {
+  return <button onClick={() => onAction(action)}>Click</button>;
+}
+```
+
+### When NOT to Use
+
+| Pattern | Problem |
+|---------|---------|
+| `eval(userInput)` | Executes arbitrary code |
+| `new Function(userInput)` | Same as eval |
+| `setTimeout(userInput, 0)` | Executes string as code |
+| `element.onclick = userInput` | Bypasses React |
+
+---
+
+## Server-Side Rendering Risks
+
+SSR introduces additional XSS vectors because HTML is generated on the server before React hydrates.
+
+```tsx
+// VULNERABLE: Injecting data into script tags
+function Page({ userData }: { userData: object }) {
+  return (
+    <html>
+      <body>
+        <div id="root" />
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `window.__DATA__ = ${JSON.stringify(userData)};`
+          }}
+        />
+      </body>
+    </html>
+  );
+}
+
+// Attacker data: { "name": "</script><script>alert('xss')</script>" }
+```
+
+### Safe SSR Data Serialization
+
+```tsx
+function escapeJsonForScript(data: unknown): string {
+  return JSON.stringify(data)
+    .replace(/</g, '\\u003c')
+    .replace(/>/g, '\\u003e')
+    .replace(/&/g, '\\u0026')
+    .replace(/'/g, '\\u0027');
+}
+
+function SafePage({ userData }: { userData: object }) {
+  return (
+    <html>
+      <body>
+        <div id="root" />
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `window.__DATA__ = ${escapeJsonForScript(userData)};`
+          }}
+        />
+      </body>
+    </html>
+  );
+}
+```
+
+<Callout type="info">
+Unicode escaping prevents breaking out of the script context while keeping JSON valid.
+</Callout>
+
+---
+
+## Content Security Policy
+
+CSP provides defense-in-depth by restricting what scripts can execute.
+
+### Recommended CSP Headers
+
+```tsx
+// Set via HTTP headers or meta tag
+function CSPMeta() {
+  return (
+    <meta
+      httpEquiv="Content-Security-Policy"
+      content={[
+        "default-src 'self'",
+        "script-src 'self'",
+        "style-src 'self' 'unsafe-inline'",
+        "img-src 'self' data: https:",
+        "connect-src 'self'",
+        "frame-ancestors 'none'",
+      ].join('; ')}
+    />
+  );
+}
+```
+
+### CSP Directives for React Apps
+
+| Directive | Recommended Value | Purpose |
+|-----------|-------------------|---------|
+| `default-src` | `'self'` | Fallback for all resource types |
+| `script-src` | `'self'` | Restrict script sources |
+| `style-src` | `'self'` | Restrict stylesheets |
+| `img-src` | `'self' data: https:` | Allow secure images |
+| `connect-src` | `'self'` | Restrict fetch/XHR |
+| `frame-ancestors` | `'none'` | Prevent clickjacking |
+
+<Callout type="warn">
+Avoid `'unsafe-eval'` and `'unsafe-inline'` for scripts. These negate most CSP protection against XSS.
+</Callout>
+
+---
+
+## Testing for XSS
+
+### Common Test Payloads
+
+```tsx
+const xssTestPayloads = [
+  '<script>alert("xss")</script>',
+  '<img src=x onerror=alert("xss")>',
+  '<svg onload=alert("xss")>',
+  'javascript:alert("xss")',
+  '"><script>alert("xss")</script>',
+  "'-alert('xss')-'",
+  '<a href="javascript:alert(\'xss\')">click</a>',
+];
+
+// Test component with payloads
+function testComponentForXSS(
+  Component: React.ComponentType<{ input: string }>
+) {
+  xssTestPayloads.forEach((payload) => {
+    const { container } = render(<Component input={payload} />);
+
+    // Check that payload is escaped, not executed
+    expect(container.innerHTML).not.toContain('<script>');
+    expect(container.innerHTML).not.toContain('onerror=');
+    expect(container.innerHTML).not.toContain('javascript:');
+  });
+}
+```
+
+### Automated Testing Approach
+
+```tsx
+import { render } from '@testing-library/react';
+
+describe('XSS Prevention', () => {
+  it('escapes script tags in user content', () => {
+    const maliciousInput = '<script>alert("xss")</script>';
+    const { container } = render(<UserContent content={maliciousInput} />);
+
+    // Script should be visible as text, not executed
+    expect(container.textContent).toContain('<script>');
+    expect(container.querySelector('script')).toBeNull();
+  });
+
+  it('blocks javascript: URLs', () => {
+    const maliciousUrl = 'javascript:alert("xss")';
+    const { container } = render(<SafeLink url={maliciousUrl}>Link</SafeLink>);
+
+    const link = container.querySelector('a');
+    expect(link).toBeNull(); // Link should not render
+  });
+});
+```
+
+---
+
+## Summary
+
+| Attack Vector | Prevention |
+|---------------|------------|
+| Text injection | React auto-escapes (default) |
+| HTML injection | Avoid `dangerouslySetInnerHTML` or sanitize |
+| URL injection | Validate protocols, use allowlist |
+| Event handlers | Never use dynamic strings |
+| SSR data | Escape JSON for script context |
+| General | Implement CSP headers |
+
+<Callout type="info">
+Defense in depth: combine React's escaping with CSP, input validation, and server-side sanitization.
+</Callout>

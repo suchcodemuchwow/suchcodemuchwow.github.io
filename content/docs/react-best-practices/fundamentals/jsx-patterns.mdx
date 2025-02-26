@@ -1,0 +1,375 @@
+---
+title: JSX Patterns
+description: Best practices for writing clean, readable JSX in React
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## Fragment Usage
+
+Fragments let you group elements without adding extra DOM nodes.
+
+### Short Syntax vs React.Fragment
+
+```tsx
+// Short syntax - most common
+function UserInfo({ user }: { user: User }) {
+  return (
+    <>
+      <h1>{user.name}</h1>
+      <p>{user.email}</p>
+    </>
+  );
+}
+
+// React.Fragment - required when you need a key
+function UserList({ users }: { users: User[] }) {
+  return (
+    <dl>
+      {users.map(user => (
+        <React.Fragment key={user.id}>
+          <dt>{user.name}</dt>
+          <dd>{user.email}</dd>
+        </React.Fragment>
+      ))}
+    </dl>
+  );
+}
+```
+
+| Syntax | Use When |
+|--------|----------|
+| `<>...</>` | Grouping without keys |
+| `<React.Fragment>` | Need `key` prop in lists |
+
+<Callout type="warn" title="Common Mistake">
+You cannot add attributes to short fragments. If you need a key, use `React.Fragment`.
+</Callout>
+
+---
+
+## Expression Patterns
+
+### Ternary vs Logical AND
+
+```tsx
+// Ternary: when you have both branches
+{isLoading ? <Spinner /> : <Content />}
+
+// Logical AND: when rendering or nothing
+{hasError && <ErrorMessage />}
+
+// Danger: falsy values leak into DOM
+{count && <Badge count={count} />}  // Renders "0" when count is 0!
+
+// Safe: explicit boolean conversion
+{count > 0 && <Badge count={count} />}
+{Boolean(items.length) && <List items={items} />}
+```
+
+| Pattern | Use When | Watch Out |
+|---------|----------|-----------|
+| `cond ? A : B` | Two different outputs | Nested ternaries are hard to read |
+| `cond && A` | Render or nothing | Falsy numbers/strings render |
+| `cond ? A : null` | Explicit "nothing" case | More verbose than `&&` |
+
+<Callout type="warn" title="Zero Gotcha">
+`{0 && <Component />}` renders `0`, not nothing. Always use boolean conditions.
+</Callout>
+
+### Guard Clauses for Early Returns
+
+```tsx
+// Prefer early returns over nested ternaries
+function UserProfile({ userId }: { userId: string | null }) {
+  if (!userId) {
+    return <LoginPrompt />;
+  }
+
+  const { data: user, isLoading, error } = useUser(userId);
+
+  if (isLoading) {
+    return <Spinner />;
+  }
+
+  if (error) {
+    return <ErrorMessage error={error} />;
+  }
+
+  return (
+    <div>
+      <h1>{user.name}</h1>
+      <p>{user.bio}</p>
+    </div>
+  );
+}
+```
+
+---
+
+## Attribute Spreading
+
+### When to Spread
+
+```tsx
+// Good: forwarding props to underlying element
+interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
+  variant?: 'primary' | 'secondary';
+}
+
+function Button({ variant = 'primary', ...props }: ButtonProps) {
+  return <button className={`btn-${variant}`} {...props} />;
+}
+
+// Good: rest props after specific props
+function Input({ label, error, ...inputProps }: InputProps) {
+  return (
+    <div>
+      <label>{label}</label>
+      <input {...inputProps} />
+      {error && <span className="error">{error}</span>}
+    </div>
+  );
+}
+```
+
+### When NOT to Spread
+
+```tsx
+// Bad: spreading unknown objects
+function Card(props: CardProps) {
+  return <div {...props.config} />; // What's in config?
+}
+
+// Bad: overriding important props
+function DangerButton(props: ButtonProps) {
+  return <button {...props} type="button" />; // User can't set type="submit"
+}
+
+// Good: explicit prop order
+function SafeButton({ type = 'button', ...props }: ButtonProps) {
+  return <button type={type} {...props} />;
+}
+```
+
+| Pattern | Pros | Cons |
+|---------|------|------|
+| Spread first, then override | Ensures your defaults win | User props ignored |
+| Override first, then spread | User has full control | Your defaults may be overwritten |
+| Destructure with defaults | Explicit, predictable | More verbose |
+
+---
+
+## Self-Closing Tags
+
+```tsx
+// Self-close elements without children
+<input type="text" />
+<img src={url} alt={description} />
+<Component prop={value} />
+<br />
+
+// Don't self-close elements that might have children
+<div></div>        // Acceptable, shows intent
+<span></span>      // Acceptable
+<textarea></textarea>  // Required for some browsers
+```
+
+<Callout type="info" title="Convention">
+Always self-close components and void HTML elements. Use explicit closing tags only when the element semantically could have children.
+</Callout>
+
+---
+
+## Whitespace Handling
+
+JSX strips whitespace between elements. Be explicit when you need it.
+
+```tsx
+// Problem: no space between elements
+<span>Hello</span><span>World</span>  // "HelloWorld"
+
+// Solution 1: space in curly braces
+<span>Hello</span>{' '}<span>World</span>  // "Hello World"
+
+// Solution 2: space in text
+<span>Hello </span><span>World</span>  // "Hello World"
+
+// For line breaks, use <br /> or CSS
+<p>
+  Line one<br />
+  Line two
+</p>
+```
+
+### Multiline JSX Formatting
+
+```tsx
+// Wrap multiline JSX in parentheses
+return (
+  <div>
+    <Header />
+    <Main />
+    <Footer />
+  </div>
+);
+
+// Single element can omit parentheses
+return <SimpleComponent />;
+
+// Keep opening tag on same line as return
+return (     // Good
+  <div>
+
+return       // Bad - ASI can insert semicolon
+  (<div>
+```
+
+---
+
+## Extract to Variables vs Inline
+
+### When to Extract
+
+```tsx
+// Extract: complex logic
+function OrderSummary({ items }: { items: Item[] }) {
+  const subtotal = items.reduce((sum, item) => sum + item.price, 0);
+  const tax = subtotal * 0.1;
+  const total = subtotal + tax;
+
+  const hasDiscount = items.some(item => item.discounted);
+  const discountMessage = hasDiscount ? 'Discounts applied' : null;
+
+  return (
+    <div>
+      <p>Subtotal: ${subtotal}</p>
+      <p>Tax: ${tax}</p>
+      <p>Total: ${total}</p>
+      {discountMessage && <p>{discountMessage}</p>}
+    </div>
+  );
+}
+
+// Extract: reused values
+function UserCard({ user }: { user: User }) {
+  const fullName = `${user.firstName} ${user.lastName}`;
+
+  return (
+    <div>
+      <h2>{fullName}</h2>
+      <p>Welcome back, {fullName}!</p>
+    </div>
+  );
+}
+```
+
+### When to Inline
+
+```tsx
+// Inline: simple expressions
+function Greeting({ name }: { name: string }) {
+  return <h1>Hello, {name.toUpperCase()}!</h1>;
+}
+
+// Inline: simple conditionals
+function Status({ isOnline }: { isOnline: boolean }) {
+  return <span>{isOnline ? 'Online' : 'Offline'}</span>;
+}
+
+// Inline: array mapping (unless complex)
+function Tags({ tags }: { tags: string[] }) {
+  return (
+    <ul>
+      {tags.map(tag => <li key={tag}>{tag}</li>)}
+    </ul>
+  );
+}
+```
+
+| Extract When | Inline When |
+|--------------|-------------|
+| Logic is complex | Expression is simple |
+| Value is reused | Used only once |
+| Improves readability | Extraction adds noise |
+| Needs comments to explain | Self-explanatory |
+
+---
+
+## Conditional Rendering Patterns
+
+### Multiple Conditions
+
+```tsx
+// Object lookup for multiple states
+type Status = 'loading' | 'error' | 'success' | 'idle';
+
+function StatusDisplay({ status, data, error }: StatusDisplayProps) {
+  const content: Record<Status, React.ReactNode> = {
+    idle: <p>Ready to load</p>,
+    loading: <Spinner />,
+    error: <ErrorMessage error={error} />,
+    success: <DataView data={data} />,
+  };
+
+  return <div>{content[status]}</div>;
+}
+
+// Immediately invoked function for complex logic
+function ComplexRender({ state }: { state: AppState }) {
+  return (
+    <div>
+      {(() => {
+        if (state.isLoading) return <Spinner />;
+        if (state.error) return <Error error={state.error} />;
+        if (!state.data) return <Empty />;
+        return <Content data={state.data} />;
+      })()}
+    </div>
+  );
+}
+```
+
+<Callout type="info" title="Prefer Early Returns">
+When possible, use early returns at the component level rather than complex inline conditionals.
+</Callout>
+
+---
+
+## JSX Expressions Best Practices
+
+### What You Can Use in JSX
+
+```tsx
+// Strings and numbers render directly
+<p>{user.name}</p>
+<p>{user.age}</p>
+
+// Arrays of elements (need keys)
+<ul>{items.map(item => <li key={item.id}>{item.name}</li>)}</ul>
+
+// null, undefined, true, false render nothing
+<div>{null}</div>           // Empty
+<div>{undefined}</div>      // Empty
+<div>{true}</div>           // Empty
+<div>{false}</div>          // Empty
+
+// Objects don't render - will throw error
+<div>{user}</div>           // Error!
+<div>{JSON.stringify(user)}</div>  // Works but ugly
+```
+
+### Avoid JSX in Event Handlers
+
+```tsx
+// Bad: JSX in handler
+<button onClick={() => setContent(<NewComponent />)}>
+  Show
+</button>
+
+// Good: state determines what renders
+const [showNew, setShowNew] = useState(false);
+
+<button onClick={() => setShowNew(true)}>Show</button>
+{showNew && <NewComponent />}
+```

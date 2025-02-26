@@ -1,0 +1,238 @@
+---
+title: Component Type Definitions
+description: TypeScript patterns for defining React component types including FC, function components, and class components.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## Overview
+
+React components in TypeScript can be typed in several ways. This guide covers the primary patterns for defining component types, their trade-offs, and when to use each approach.
+
+## Function Components
+
+### Plain Function Declaration
+
+The simplest and most recommended approach for typing React components.
+
+```tsx
+interface ButtonProps {
+  label: string;
+  onClick: () => void;
+}
+
+function Button({ label, onClick }: ButtonProps) {
+  return <button onClick={onClick}>{label}</button>;
+}
+```
+
+### Arrow Function with Type Annotation
+
+```tsx
+interface CardProps {
+  title: string;
+  children: React.ReactNode;
+}
+
+const Card = ({ title, children }: CardProps): React.ReactElement => {
+  return (
+    <div className="card">
+      <h2>{title}</h2>
+      {children}
+    </div>
+  );
+};
+```
+
+### React.FC (Function Component)
+
+```tsx
+import { FC } from 'react';
+
+interface AlertProps {
+  message: string;
+  severity: 'error' | 'warning' | 'info';
+}
+
+const Alert: FC<AlertProps> = ({ message, severity }) => {
+  return <div className={`alert alert-${severity}`}>{message}</div>;
+};
+```
+
+<Callout type="warn">
+`React.FC` was historically controversial due to implicit `children` prop inclusion. As of React 18, `children` is no longer implicitly included, making this less of an issue.
+</Callout>
+
+## Comparison Table
+
+| Pattern | Implicit Children | Generic Support | Explicit Return Type | Verbosity |
+|---------|-------------------|-----------------|---------------------|-----------|
+| Function Declaration | No | Yes | Optional | Low |
+| Arrow Function | No | Yes | Optional | Low |
+| React.FC | No (React 18+) | Limited | Yes | Medium |
+
+## Pros and Cons
+
+### Plain Function Declaration
+
+| Pros | Cons |
+|------|------|
+| Simple and readable | No built-in return type checking |
+| Full generic support | Must manually type return if needed |
+| Standard JavaScript pattern | - |
+| Easy to convert to/from hooks | - |
+
+### React.FC
+
+| Pros | Cons |
+|------|------|
+| Explicit return type | Verbose syntax |
+| Clear component intent | Generics require workarounds |
+| Consistent team pattern | Historical baggage with children |
+| displayName typing included | Slight runtime overhead (negligible) |
+
+## Components with Generics
+
+Plain functions handle generics naturally:
+
+```tsx
+interface ListProps<T> {
+  items: T[];
+  renderItem: (item: T) => React.ReactNode;
+}
+
+function List<T>({ items, renderItem }: ListProps<T>) {
+  return <ul>{items.map(renderItem)}</ul>;
+}
+
+// Usage
+<List items={[1, 2, 3]} renderItem={(n) => <li key={n}>{n}</li>} />
+```
+
+<Callout type="info">
+Generic components are covered in depth in the [Generic Components](/docs/react/generic-components) guide.
+</Callout>
+
+## Forward Ref Components
+
+When you need to expose a DOM ref:
+
+```tsx
+import { forwardRef } from 'react';
+
+interface InputProps {
+  label: string;
+  error?: string;
+}
+
+const Input = forwardRef<HTMLInputElement, InputProps>(
+  ({ label, error }, ref) => {
+    return (
+      <div>
+        <label>{label}</label>
+        <input ref={ref} />
+        {error && <span className="error">{error}</span>}
+      </div>
+    );
+  }
+);
+
+Input.displayName = 'Input';
+```
+
+## Class Components
+
+While less common in modern React, class components use `React.Component`:
+
+```tsx
+import { Component } from 'react';
+
+interface CounterProps {
+  initialValue: number;
+}
+
+interface CounterState {
+  count: number;
+}
+
+class Counter extends Component<CounterProps, CounterState> {
+  state: CounterState = {
+    count: this.props.initialValue,
+  };
+
+  increment = () => {
+    this.setState((prev) => ({ count: prev.count + 1 }));
+  };
+
+  render() {
+    return (
+      <button onClick={this.increment}>
+        Count: {this.state.count}
+      </button>
+    );
+  }
+}
+```
+
+## When to Use
+
+| Pattern | Use When |
+|---------|----------|
+| Function Declaration | Default choice for most components |
+| Arrow Function | Inline components, callbacks |
+| React.FC | Team convention requires it, explicit return typing needed |
+| forwardRef | Component needs to expose DOM element ref |
+| Class Component | Legacy code, error boundaries |
+
+## When NOT to Use
+
+| Pattern | Avoid When |
+|---------|------------|
+| React.FC | Building generic components, maximum type inference needed |
+| Class Component | New code (prefer hooks), simple presentational components |
+| Arrow Function | Top-level exported components (debugging names) |
+
+## Return Type Patterns
+
+### Implicit Return Type (Recommended)
+
+```tsx
+function Badge({ text }: { text: string }) {
+  return <span className="badge">{text}</span>;
+}
+```
+
+### Explicit ReactElement
+
+```tsx
+function Badge({ text }: { text: string }): React.ReactElement {
+  return <span className="badge">{text}</span>;
+}
+```
+
+### Nullable Return
+
+```tsx
+function ConditionalBadge({
+  text,
+  show
+}: {
+  text: string;
+  show: boolean;
+}): React.ReactElement | null {
+  if (!show) return null;
+  return <span className="badge">{text}</span>;
+}
+```
+
+<Callout type="info">
+TypeScript infers the return type accurately in most cases. Explicit return types are useful for public APIs or when you want to enforce a specific contract.
+</Callout>
+
+## Best Practices
+
+1. **Prefer function declarations** for top-level components
+2. **Use interfaces** for props (easier to extend than types)
+3. **Avoid `any`** in component props
+4. **Name props interfaces consistently**: `ComponentNameProps`
+5. **Export props types** when building reusable components

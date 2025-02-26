@@ -1,0 +1,869 @@
+---
+title: Form Patterns
+description: Common form patterns including multi-step forms and dynamic fields
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## Multi-Step Forms
+
+### Basic Multi-Step Form
+
+```tsx
+interface FormData {
+  // Step 1
+  firstName: string;
+  lastName: string;
+  // Step 2
+  email: string;
+  phone: string;
+  // Step 3
+  address: string;
+  city: string;
+  zip: string;
+}
+
+const initialData: FormData = {
+  firstName: '',
+  lastName: '',
+  email: '',
+  phone: '',
+  address: '',
+  city: '',
+  zip: '',
+};
+
+function MultiStepForm() {
+  const [step, setStep] = useState(1);
+  const [data, setData] = useState<FormData>(initialData);
+  const totalSteps = 3;
+
+  const updateFields = (fields: Partial<FormData>) => {
+    setData((prev) => ({ ...prev, ...fields }));
+  };
+
+  const next = () => setStep((s) => Math.min(s + 1, totalSteps));
+  const back = () => setStep((s) => Math.max(s - 1, 1));
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (step < totalSteps) {
+      next();
+    } else {
+      console.log('Final submission:', data);
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <ProgressIndicator current={step} total={totalSteps} />
+
+      {step === 1 && (
+        <PersonalInfoStep data={data} updateFields={updateFields} />
+      )}
+      {step === 2 && (
+        <ContactStep data={data} updateFields={updateFields} />
+      )}
+      {step === 3 && (
+        <AddressStep data={data} updateFields={updateFields} />
+      )}
+
+      <div className="buttons">
+        {step > 1 && (
+          <button type="button" onClick={back}>
+            Back
+          </button>
+        )}
+        <button type="submit">
+          {step === totalSteps ? 'Submit' : 'Next'}
+        </button>
+      </div>
+    </form>
+  );
+}
+```
+
+### Step Components
+
+```tsx
+interface StepProps {
+  data: FormData;
+  updateFields: (fields: Partial<FormData>) => void;
+}
+
+function PersonalInfoStep({ data, updateFields }: StepProps) {
+  return (
+    <fieldset>
+      <legend>Personal Information</legend>
+      <input
+        value={data.firstName}
+        onChange={(e) => updateFields({ firstName: e.target.value })}
+        placeholder="First Name"
+        required
+      />
+      <input
+        value={data.lastName}
+        onChange={(e) => updateFields({ lastName: e.target.value })}
+        placeholder="Last Name"
+        required
+      />
+    </fieldset>
+  );
+}
+
+function ContactStep({ data, updateFields }: StepProps) {
+  return (
+    <fieldset>
+      <legend>Contact Information</legend>
+      <input
+        type="email"
+        value={data.email}
+        onChange={(e) => updateFields({ email: e.target.value })}
+        placeholder="Email"
+        required
+      />
+      <input
+        type="tel"
+        value={data.phone}
+        onChange={(e) => updateFields({ phone: e.target.value })}
+        placeholder="Phone"
+      />
+    </fieldset>
+  );
+}
+
+function AddressStep({ data, updateFields }: StepProps) {
+  return (
+    <fieldset>
+      <legend>Address</legend>
+      <input
+        value={data.address}
+        onChange={(e) => updateFields({ address: e.target.value })}
+        placeholder="Street Address"
+        required
+      />
+      <input
+        value={data.city}
+        onChange={(e) => updateFields({ city: e.target.value })}
+        placeholder="City"
+        required
+      />
+      <input
+        value={data.zip}
+        onChange={(e) => updateFields({ zip: e.target.value })}
+        placeholder="ZIP Code"
+        required
+      />
+    </fieldset>
+  );
+}
+```
+
+### Progress Indicator
+
+```tsx
+function ProgressIndicator({ current, total }: { current: number; total: number }) {
+  return (
+    <div className="progress" role="progressbar" aria-valuenow={current} aria-valuemax={total}>
+      <div className="steps">
+        {Array.from({ length: total }, (_, i) => (
+          <div
+            key={i}
+            className={`step ${i + 1 <= current ? 'active' : ''}`}
+            aria-current={i + 1 === current ? 'step' : undefined}
+          >
+            {i + 1}
+          </div>
+        ))}
+      </div>
+      <span>Step {current} of {total}</span>
+    </div>
+  );
+}
+```
+
+---
+
+## Multi-Step with Validation
+
+```tsx
+interface StepConfig {
+  component: React.ComponentType<StepProps>;
+  validate: (data: FormData) => Record<string, string>;
+}
+
+const steps: StepConfig[] = [
+  {
+    component: PersonalInfoStep,
+    validate: (data) => {
+      const errors: Record<string, string> = {};
+      if (!data.firstName) errors.firstName = 'Required';
+      if (!data.lastName) errors.lastName = 'Required';
+      return errors;
+    },
+  },
+  {
+    component: ContactStep,
+    validate: (data) => {
+      const errors: Record<string, string> = {};
+      if (!data.email) errors.email = 'Required';
+      if (data.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email)) {
+        errors.email = 'Invalid email';
+      }
+      return errors;
+    },
+  },
+  {
+    component: AddressStep,
+    validate: (data) => {
+      const errors: Record<string, string> = {};
+      if (!data.address) errors.address = 'Required';
+      if (!data.city) errors.city = 'Required';
+      return errors;
+    },
+  },
+];
+
+function ValidatedMultiStepForm() {
+  const [step, setStep] = useState(0);
+  const [data, setData] = useState<FormData>(initialData);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  const currentStep = steps[step];
+  const StepComponent = currentStep.component;
+
+  const validateCurrentStep = (): boolean => {
+    const stepErrors = currentStep.validate(data);
+    setErrors(stepErrors);
+    return Object.keys(stepErrors).length === 0;
+  };
+
+  const handleNext = () => {
+    if (validateCurrentStep()) {
+      if (step < steps.length - 1) {
+        setStep((s) => s + 1);
+        setErrors({});
+      } else {
+        handleFinalSubmit();
+      }
+    }
+  };
+
+  const handleFinalSubmit = () => {
+    console.log('Submitting:', data);
+  };
+
+  return (
+    <div>
+      <StepComponent
+        data={data}
+        updateFields={(fields) => setData((prev) => ({ ...prev, ...fields }))}
+        errors={errors}
+      />
+      <button type="button" onClick={() => setStep((s) => s - 1)} disabled={step === 0}>
+        Back
+      </button>
+      <button type="button" onClick={handleNext}>
+        {step === steps.length - 1 ? 'Submit' : 'Next'}
+      </button>
+    </div>
+  );
+}
+```
+
+---
+
+## Dynamic Fields (Add/Remove)
+
+### Basic Dynamic Fields
+
+```tsx
+interface Item {
+  id: string;
+  name: string;
+  quantity: number;
+}
+
+function DynamicFieldsForm() {
+  const [items, setItems] = useState<Item[]>([
+    { id: crypto.randomUUID(), name: '', quantity: 1 },
+  ]);
+
+  const addItem = () => {
+    setItems([...items, { id: crypto.randomUUID(), name: '', quantity: 1 }]);
+  };
+
+  const removeItem = (id: string) => {
+    setItems(items.filter((item) => item.id !== id));
+  };
+
+  const updateItem = (id: string, updates: Partial<Item>) => {
+    setItems(items.map((item) =>
+      item.id === id ? { ...item, ...updates } : item
+    ));
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    console.log('Items:', items);
+  };
+
+  return (
+    <form onSubmit={handleSubmit}>
+      {items.map((item, index) => (
+        <div key={item.id} className="item-row">
+          <input
+            value={item.name}
+            onChange={(e) => updateItem(item.id, { name: e.target.value })}
+            placeholder={`Item ${index + 1}`}
+          />
+          <input
+            type="number"
+            min={1}
+            value={item.quantity}
+            onChange={(e) => updateItem(item.id, { quantity: Number(e.target.value) })}
+          />
+          <button
+            type="button"
+            onClick={() => removeItem(item.id)}
+            disabled={items.length === 1}
+            aria-label={`Remove item ${index + 1}`}
+          >
+            Remove
+          </button>
+        </div>
+      ))}
+      <button type="button" onClick={addItem}>
+        Add Item
+      </button>
+      <button type="submit">Submit</button>
+    </form>
+  );
+}
+```
+
+<Callout type="info" title="Stable Keys">
+Use stable IDs (like UUID) for dynamic fields, not array indices. This prevents React from confusing items when reordering.
+</Callout>
+
+### Dynamic Fields with Validation
+
+```tsx
+interface FieldError {
+  name?: string;
+  quantity?: string;
+}
+
+function ValidatedDynamicFields() {
+  const [items, setItems] = useState<Item[]>([
+    { id: crypto.randomUUID(), name: '', quantity: 1 },
+  ]);
+  const [errors, setErrors] = useState<Record<string, FieldError>>({});
+
+  const validateItem = (item: Item): FieldError => {
+    const itemErrors: FieldError = {};
+    if (!item.name.trim()) itemErrors.name = 'Name required';
+    if (item.quantity < 1) itemErrors.quantity = 'Min quantity is 1';
+    return itemErrors;
+  };
+
+  const validateAll = (): boolean => {
+    const newErrors: Record<string, FieldError> = {};
+    let isValid = true;
+
+    items.forEach((item) => {
+      const itemErrors = validateItem(item);
+      if (Object.keys(itemErrors).length > 0) {
+        newErrors[item.id] = itemErrors;
+        isValid = false;
+      }
+    });
+
+    setErrors(newErrors);
+    return isValid;
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (validateAll()) {
+      console.log('Valid items:', items);
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit}>
+      {items.map((item, index) => (
+        <div key={item.id}>
+          <input
+            value={item.name}
+            onChange={(e) => {
+              updateItem(item.id, { name: e.target.value });
+              // Clear error on change
+              setErrors((prev) => ({
+                ...prev,
+                [item.id]: { ...prev[item.id], name: undefined },
+              }));
+            }}
+            aria-invalid={!!errors[item.id]?.name}
+          />
+          {errors[item.id]?.name && <span>{errors[item.id].name}</span>}
+        </div>
+      ))}
+      <button type="submit">Submit</button>
+    </form>
+  );
+}
+```
+
+---
+
+## Reorderable Fields
+
+```tsx
+function ReorderableFields() {
+  const [items, setItems] = useState<Item[]>([
+    { id: '1', name: 'First', quantity: 1 },
+    { id: '2', name: 'Second', quantity: 2 },
+    { id: '3', name: 'Third', quantity: 3 },
+  ]);
+
+  const moveItem = (fromIndex: number, toIndex: number) => {
+    const newItems = [...items];
+    const [removed] = newItems.splice(fromIndex, 1);
+    newItems.splice(toIndex, 0, removed);
+    setItems(newItems);
+  };
+
+  return (
+    <ul>
+      {items.map((item, index) => (
+        <li key={item.id}>
+          <span>{item.name}</span>
+          <button
+            type="button"
+            onClick={() => moveItem(index, index - 1)}
+            disabled={index === 0}
+            aria-label="Move up"
+          >
+            Up
+          </button>
+          <button
+            type="button"
+            onClick={() => moveItem(index, index + 1)}
+            disabled={index === items.length - 1}
+            aria-label="Move down"
+          >
+            Down
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+```
+
+---
+
+## Conditional Fields
+
+### Show/Hide Based on Selection
+
+```tsx
+type AccountType = 'personal' | 'business';
+
+interface FormValues {
+  accountType: AccountType;
+  firstName: string;
+  lastName: string;
+  companyName: string;
+  taxId: string;
+}
+
+function ConditionalFieldsForm() {
+  const [values, setValues] = useState<FormValues>({
+    accountType: 'personal',
+    firstName: '',
+    lastName: '',
+    companyName: '',
+    taxId: '',
+  });
+
+  const update = (field: keyof FormValues, value: string) => {
+    setValues((prev) => ({ ...prev, [field]: value }));
+  };
+
+  return (
+    <form>
+      <fieldset>
+        <legend>Account Type</legend>
+        <label>
+          <input
+            type="radio"
+            name="accountType"
+            value="personal"
+            checked={values.accountType === 'personal'}
+            onChange={() => update('accountType', 'personal')}
+          />
+          Personal
+        </label>
+        <label>
+          <input
+            type="radio"
+            name="accountType"
+            value="business"
+            checked={values.accountType === 'business'}
+            onChange={() => update('accountType', 'business')}
+          />
+          Business
+        </label>
+      </fieldset>
+
+      {values.accountType === 'personal' && (
+        <fieldset>
+          <legend>Personal Details</legend>
+          <input
+            value={values.firstName}
+            onChange={(e) => update('firstName', e.target.value)}
+            placeholder="First Name"
+          />
+          <input
+            value={values.lastName}
+            onChange={(e) => update('lastName', e.target.value)}
+            placeholder="Last Name"
+          />
+        </fieldset>
+      )}
+
+      {values.accountType === 'business' && (
+        <fieldset>
+          <legend>Business Details</legend>
+          <input
+            value={values.companyName}
+            onChange={(e) => update('companyName', e.target.value)}
+            placeholder="Company Name"
+          />
+          <input
+            value={values.taxId}
+            onChange={(e) => update('taxId', e.target.value)}
+            placeholder="Tax ID"
+          />
+        </fieldset>
+      )}
+    </form>
+  );
+}
+```
+
+### Dependent Selects
+
+```tsx
+interface Country {
+  code: string;
+  name: string;
+}
+
+interface State {
+  code: string;
+  name: string;
+}
+
+const countries: Country[] = [
+  { code: 'us', name: 'United States' },
+  { code: 'ca', name: 'Canada' },
+];
+
+const statesByCountry: Record<string, State[]> = {
+  us: [
+    { code: 'ny', name: 'New York' },
+    { code: 'ca', name: 'California' },
+  ],
+  ca: [
+    { code: 'on', name: 'Ontario' },
+    { code: 'bc', name: 'British Columbia' },
+  ],
+};
+
+function DependentSelectsForm() {
+  const [country, setCountry] = useState('');
+  const [state, setState] = useState('');
+
+  const availableStates = country ? statesByCountry[country] ?? [] : [];
+
+  const handleCountryChange = (newCountry: string) => {
+    setCountry(newCountry);
+    setState(''); // Reset state when country changes
+  };
+
+  return (
+    <form>
+      <select value={country} onChange={(e) => handleCountryChange(e.target.value)}>
+        <option value="">Select Country</option>
+        {countries.map((c) => (
+          <option key={c.code} value={c.code}>{c.name}</option>
+        ))}
+      </select>
+
+      <select
+        value={state}
+        onChange={(e) => setState(e.target.value)}
+        disabled={!country}
+      >
+        <option value="">Select State</option>
+        {availableStates.map((s) => (
+          <option key={s.code} value={s.code}>{s.name}</option>
+        ))}
+      </select>
+    </form>
+  );
+}
+```
+
+---
+
+## Form with Sections
+
+```tsx
+interface SectionProps {
+  title: string;
+  children: React.ReactNode;
+  isOpen: boolean;
+  onToggle: () => void;
+}
+
+function FormSection({ title, children, isOpen, onToggle }: SectionProps) {
+  return (
+    <section>
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={isOpen}
+      >
+        {title}
+      </button>
+      {isOpen && <div className="section-content">{children}</div>}
+    </section>
+  );
+}
+
+function SectionedForm() {
+  const [openSections, setOpenSections] = useState<Set<string>>(new Set(['basic']));
+
+  const toggleSection = (id: string) => {
+    setOpenSections((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  return (
+    <form>
+      <FormSection
+        title="Basic Information"
+        isOpen={openSections.has('basic')}
+        onToggle={() => toggleSection('basic')}
+      >
+        <input placeholder="Name" />
+        <input placeholder="Email" type="email" />
+      </FormSection>
+
+      <FormSection
+        title="Address"
+        isOpen={openSections.has('address')}
+        onToggle={() => toggleSection('address')}
+      >
+        <input placeholder="Street" />
+        <input placeholder="City" />
+      </FormSection>
+
+      <FormSection
+        title="Preferences"
+        isOpen={openSections.has('preferences')}
+        onToggle={() => toggleSection('preferences')}
+      >
+        <label>
+          <input type="checkbox" /> Newsletter
+        </label>
+        <label>
+          <input type="checkbox" /> SMS notifications
+        </label>
+      </FormSection>
+    </form>
+  );
+}
+```
+
+---
+
+## Search/Filter Form
+
+```tsx
+interface Filters {
+  query: string;
+  category: string;
+  minPrice: number | null;
+  maxPrice: number | null;
+  inStock: boolean;
+}
+
+function SearchFilterForm({ onFilter }: { onFilter: (filters: Filters) => void }) {
+  const [filters, setFilters] = useState<Filters>({
+    query: '',
+    category: '',
+    minPrice: null,
+    maxPrice: null,
+    inStock: false,
+  });
+
+  // Debounced filter application
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      onFilter(filters);
+    }, 300);
+    return () => clearTimeout(timeoutId);
+  }, [filters, onFilter]);
+
+  const updateFilter = <K extends keyof Filters>(key: K, value: Filters[K]) => {
+    setFilters((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const clearFilters = () => {
+    setFilters({
+      query: '',
+      category: '',
+      minPrice: null,
+      maxPrice: null,
+      inStock: false,
+    });
+  };
+
+  return (
+    <form onSubmit={(e) => e.preventDefault()}>
+      <input
+        type="search"
+        value={filters.query}
+        onChange={(e) => updateFilter('query', e.target.value)}
+        placeholder="Search..."
+      />
+
+      <select
+        value={filters.category}
+        onChange={(e) => updateFilter('category', e.target.value)}
+      >
+        <option value="">All Categories</option>
+        <option value="electronics">Electronics</option>
+        <option value="clothing">Clothing</option>
+      </select>
+
+      <div>
+        <input
+          type="number"
+          value={filters.minPrice ?? ''}
+          onChange={(e) => updateFilter('minPrice', e.target.value ? Number(e.target.value) : null)}
+          placeholder="Min Price"
+        />
+        <input
+          type="number"
+          value={filters.maxPrice ?? ''}
+          onChange={(e) => updateFilter('maxPrice', e.target.value ? Number(e.target.value) : null)}
+          placeholder="Max Price"
+        />
+      </div>
+
+      <label>
+        <input
+          type="checkbox"
+          checked={filters.inStock}
+          onChange={(e) => updateFilter('inStock', e.target.checked)}
+        />
+        In Stock Only
+      </label>
+
+      <button type="button" onClick={clearFilters}>
+        Clear Filters
+      </button>
+    </form>
+  );
+}
+```
+
+---
+
+## Form State Persistence
+
+```tsx
+function usePersistentForm<T>(key: string, initialValue: T) {
+  const [values, setValues] = useState<T>(() => {
+    const saved = sessionStorage.getItem(key);
+    return saved ? JSON.parse(saved) : initialValue;
+  });
+
+  useEffect(() => {
+    sessionStorage.setItem(key, JSON.stringify(values));
+  }, [key, values]);
+
+  const clear = () => {
+    sessionStorage.removeItem(key);
+    setValues(initialValue);
+  };
+
+  return { values, setValues, clear };
+}
+
+// Usage
+function DraftForm() {
+  const { values, setValues, clear } = usePersistentForm('contact-draft', {
+    name: '',
+    email: '',
+    message: '',
+  });
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await submitForm(values);
+    clear(); // Clear draft after successful submission
+  };
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <input
+        value={values.name}
+        onChange={(e) => setValues((v) => ({ ...v, name: e.target.value }))}
+      />
+      {/* ... */}
+    </form>
+  );
+}
+```
+
+---
+
+## When to Use Each Pattern
+
+| Pattern | Use Case |
+|---------|----------|
+| Multi-step | Long forms, onboarding flows, checkout |
+| Dynamic fields | Variable-length lists, tags, line items |
+| Conditional fields | Type-dependent forms, optional sections |
+| Dependent selects | Location pickers, hierarchical data |
+| Search/filter | Product listings, data tables |
+| Persistent forms | Draft saving, long forms |
+
+---
+
+## Pros and Cons
+
+| Pattern | Pros | Cons |
+|---------|------|------|
+| Multi-step | Less overwhelming, progressive disclosure | Complex state, navigation logic |
+| Dynamic fields | Flexible data entry | Key management, validation complexity |
+| Conditional | Cleaner UX, relevant fields only | State cleanup, validation changes |
+| Persistent | Prevents data loss | Storage limits, privacy concerns |
+
+<Callout type="warn" title="State Cleanup">
+When hiding conditional fields, decide whether to clear their values. Keeping values may confuse validation; clearing may frustrate users.
+</Callout>

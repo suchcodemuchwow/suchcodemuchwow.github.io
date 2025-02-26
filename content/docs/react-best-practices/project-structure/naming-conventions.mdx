@@ -1,0 +1,434 @@
+---
+title: Naming Conventions
+description: Consistent naming patterns for React projects
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## File Naming
+
+### Components: PascalCase
+
+```
+src/components/
+├── Button.tsx
+├── UserCard.tsx
+├── NavigationMenu.tsx
+└── DataTable/
+    ├── DataTable.tsx
+    ├── DataTableRow.tsx
+    └── DataTableHeader.tsx
+```
+
+### Non-Components: camelCase or kebab-case
+
+```
+src/
+├── hooks/
+│   ├── useAuth.ts          # camelCase for hooks
+│   └── useLocalStorage.ts
+├── utils/
+│   ├── formatDate.ts       # camelCase for utilities
+│   └── cn.ts
+├── services/
+│   ├── authService.ts      # camelCase for services
+│   └── api-client.ts       # kebab-case also acceptable
+└── types/
+    ├── user.ts             # lowercase for type files
+    └── api-responses.ts    # kebab-case for multi-word
+```
+
+### Comparison
+
+| File Type | Convention | Example |
+|-----------|------------|---------|
+| Components | PascalCase | `UserProfile.tsx` |
+| Hooks | camelCase with `use` prefix | `useAuth.ts` |
+| Utilities | camelCase | `formatCurrency.ts` |
+| Types | lowercase/kebab-case | `user.ts`, `api-types.ts` |
+| Constants | camelCase or SCREAMING_SNAKE | `config.ts`, `API_ROUTES.ts` |
+| Tests | Match source + `.test` | `Button.test.tsx` |
+| Styles | Match component + `.module` | `Button.module.css` |
+
+<Callout type="info" title="Consistency">
+Pick one convention for non-component files and stick with it across the project. The important thing is consistency, not which specific style you choose.
+</Callout>
+
+---
+
+## Component Naming
+
+### Named Exports (Preferred)
+
+```tsx
+// Button.tsx
+export function Button({ children, onClick }: ButtonProps) {
+  return <button onClick={onClick}>{children}</button>;
+}
+
+// Consumer
+import { Button } from './Button';
+```
+
+### Default Exports (Avoid)
+
+```tsx
+// Harder to refactor, inconsistent naming possible
+export default function Button() { ... }
+
+// Consumer can rename arbitrarily
+import Btn from './Button';  // Inconsistent
+import Button from './Button';
+```
+
+<Callout type="warn" title="Prefer Named Exports">
+Named exports enable better refactoring, IDE support, and enforce consistent naming. Default exports are only needed for lazy loading with `React.lazy()`.
+</Callout>
+
+### Component Name Rules
+
+| Rule | Good | Bad |
+|------|------|-----|
+| PascalCase | `UserCard` | `userCard`, `user-card` |
+| Descriptive | `ProductList` | `List`, `PL` |
+| Noun or Noun Phrase | `NavigationMenu` | `Navigate` |
+| Match file name | `UserCard.tsx` exports `UserCard` | `UserCard.tsx` exports `Card` |
+
+---
+
+## Hook Naming
+
+### Always Start with `use`
+
+React requires hooks to start with `use`. This enables the Rules of Hooks linter.
+
+```tsx
+// Custom hooks
+function useAuth() { ... }
+function useLocalStorage<T>(key: string) { ... }
+function useDebounce<T>(value: T, delay: number) { ... }
+function useMediaQuery(query: string) { ... }
+```
+
+### Naming Patterns
+
+| Pattern | Use For | Examples |
+|---------|---------|----------|
+| `use[Resource]` | Data fetching | `useUser`, `useProducts`, `useOrders` |
+| `use[Action]` | Behavior/utility | `useDebounce`, `useToggle`, `useCopyToClipboard` |
+| `use[Context]` | Context consumers | `useAuth`, `useTheme`, `useI18n` |
+| `use[Feature]State` | Feature state | `useCartState`, `useFilterState` |
+| `use[Feature]Actions` | Feature actions | `useCartActions`, `useFormActions` |
+
+### File Naming for Hooks
+
+```
+src/hooks/
+├── useAuth.ts              # Single hook per file
+├── useLocalStorage.ts
+└── useDebounce.ts
+
+src/features/cart/hooks/
+├── useCart.ts              # Main cart hook
+├── useCartItems.ts         # Specific functionality
+└── useCartTotals.ts
+```
+
+---
+
+## Event Handler Naming
+
+### Handler Functions: `handle[Event]`
+
+```tsx
+function LoginForm() {
+  const handleSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    // ...
+  };
+
+  const handleEmailChange = (e: ChangeEvent<HTMLInputElement>) => {
+    setEmail(e.target.value);
+  };
+
+  const handlePasswordChange = (e: ChangeEvent<HTMLInputElement>) => {
+    setPassword(e.target.value);
+  };
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <input onChange={handleEmailChange} />
+      <input onChange={handlePasswordChange} />
+    </form>
+  );
+}
+```
+
+### Props: `on[Event]`
+
+```tsx
+interface ButtonProps {
+  onClick?: () => void;
+  onHover?: () => void;
+  onFocus?: () => void;
+}
+
+interface ModalProps {
+  onClose: () => void;
+  onConfirm: () => void;
+  onCancel?: () => void;
+}
+
+interface FormProps {
+  onSubmit: (data: FormData) => void;
+  onValidationError?: (errors: ValidationError[]) => void;
+}
+```
+
+### Pattern Summary
+
+| Location | Convention | Example |
+|----------|------------|---------|
+| Internal handler | `handle[Event]` | `handleClick`, `handleSubmit` |
+| Prop callback | `on[Event]` | `onClick`, `onSubmit` |
+| Specific entity | `handle[Entity][Event]` | `handleUserDelete`, `handleFormReset` |
+
+```tsx
+// Complete example
+interface UserCardProps {
+  user: User;
+  onEdit: (user: User) => void;    // Prop: on[Event]
+  onDelete: (id: string) => void;
+}
+
+function UserCard({ user, onEdit, onDelete }: UserCardProps) {
+  const handleEditClick = () => {   // Handler: handle[Event]
+    onEdit(user);
+  };
+
+  const handleDeleteClick = () => {
+    onDelete(user.id);
+  };
+
+  return (
+    <div>
+      <span>{user.name}</span>
+      <button onClick={handleEditClick}>Edit</button>
+      <button onClick={handleDeleteClick}>Delete</button>
+    </div>
+  );
+}
+```
+
+---
+
+## Type/Interface Naming
+
+### Component Props
+
+```tsx
+// Pattern: [ComponentName]Props
+interface ButtonProps {
+  variant?: 'primary' | 'secondary';
+  size?: 'sm' | 'md' | 'lg';
+  children: React.ReactNode;
+}
+
+interface UserCardProps {
+  user: User;
+  onSelect?: (user: User) => void;
+}
+
+interface DataTableProps<T> {
+  data: T[];
+  columns: Column<T>[];
+}
+```
+
+### Domain Types
+
+```tsx
+// Nouns, PascalCase
+interface User {
+  id: string;
+  email: string;
+  name: string;
+}
+
+interface Product {
+  id: string;
+  title: string;
+  price: number;
+}
+
+// Qualified names for variants
+interface UserCreateInput {
+  email: string;
+  password: string;
+}
+
+interface UserUpdateInput {
+  name?: string;
+  avatar?: string;
+}
+```
+
+### Type vs Interface
+
+```tsx
+// Use interface for object shapes (extendable)
+interface User {
+  id: string;
+  name: string;
+}
+
+// Use type for unions, primitives, tuples
+type Status = 'idle' | 'loading' | 'success' | 'error';
+type ID = string | number;
+type Coordinates = [number, number];
+
+// Use type for computed types
+type UserKeys = keyof User;
+type PartialUser = Partial<User>;
+```
+
+### Naming Patterns
+
+| Type | Convention | Example |
+|------|------------|---------|
+| Props | `[Component]Props` | `ButtonProps`, `ModalProps` |
+| State | `[Feature]State` | `CartState`, `AuthState` |
+| Actions | `[Feature]Action` | `CartAction`, `FormAction` |
+| Context | `[Name]ContextValue` | `AuthContextValue` |
+| API Response | `[Entity]Response` | `UserResponse`, `ProductsResponse` |
+| Input/Payload | `[Entity][Action]Input` | `UserCreateInput` |
+
+---
+
+## Constant Naming
+
+### Configuration Constants
+
+```tsx
+// camelCase for config objects
+export const apiConfig = {
+  baseUrl: import.meta.env.VITE_API_URL,
+  timeout: 5000,
+};
+
+// SCREAMING_SNAKE_CASE for primitive constants
+export const MAX_RETRY_ATTEMPTS = 3;
+export const DEFAULT_PAGE_SIZE = 20;
+export const API_VERSION = 'v1';
+```
+
+### Route Constants
+
+```tsx
+// Route paths
+export const ROUTES = {
+  HOME: '/',
+  LOGIN: '/login',
+  DASHBOARD: '/dashboard',
+  USER_PROFILE: '/users/:id',
+} as const;
+
+// API endpoints
+export const API_ENDPOINTS = {
+  USERS: '/api/users',
+  PRODUCTS: '/api/products',
+  AUTH_LOGIN: '/api/auth/login',
+} as const;
+```
+
+### Magic Numbers
+
+```tsx
+// Bad: Magic numbers
+if (password.length < 8) { ... }
+setTimeout(callback, 300);
+
+// Good: Named constants
+const MIN_PASSWORD_LENGTH = 8;
+const DEBOUNCE_DELAY_MS = 300;
+
+if (password.length < MIN_PASSWORD_LENGTH) { ... }
+setTimeout(callback, DEBOUNCE_DELAY_MS);
+```
+
+---
+
+## Test File Naming
+
+### Unit Tests
+
+```
+src/components/Button/
+├── Button.tsx
+└── Button.test.tsx      # Colocated unit test
+
+src/hooks/
+├── useAuth.ts
+└── useAuth.test.ts
+```
+
+### Integration Tests
+
+```
+tests/integration/
+├── auth-flow.test.tsx
+├── checkout-flow.test.tsx
+└── user-management.test.tsx
+```
+
+### E2E Tests (Playwright)
+
+```
+e2e/
+├── auth.spec.ts
+├── checkout.spec.ts
+└── navigation.spec.ts
+```
+
+### Test Naming Patterns
+
+| Test Type | File Pattern | Example |
+|-----------|--------------|---------|
+| Unit test | `[Name].test.tsx` | `Button.test.tsx` |
+| Integration | `[feature]-flow.test.tsx` | `auth-flow.test.tsx` |
+| E2E | `[feature].spec.ts` | `checkout.spec.ts` |
+
+### Test Block Naming
+
+```tsx
+// Describe: Component/function name
+describe('Button', () => {
+  // It: should [expected behavior]
+  it('should render children', () => { ... });
+  it('should call onClick when clicked', () => { ... });
+  it('should be disabled when disabled prop is true', () => { ... });
+});
+
+describe('useAuth', () => {
+  it('should return null user when not authenticated', () => { ... });
+  it('should update user after successful login', () => { ... });
+});
+```
+
+---
+
+## Quick Reference
+
+| Item | Convention | Example |
+|------|------------|---------|
+| Component file | PascalCase | `UserCard.tsx` |
+| Component name | PascalCase | `export function UserCard` |
+| Hook file | camelCase | `useAuth.ts` |
+| Hook name | camelCase with `use` | `function useAuth()` |
+| Utility file | camelCase/kebab | `formatDate.ts` |
+| Handler (internal) | `handle[Event]` | `handleSubmit` |
+| Handler (prop) | `on[Event]` | `onSubmit` |
+| Props type | `[Component]Props` | `ButtonProps` |
+| Constant (object) | camelCase | `apiConfig` |
+| Constant (primitive) | SCREAMING_SNAKE | `MAX_RETRIES` |
+| Test file | `[Name].test.tsx` | `Button.test.tsx` |

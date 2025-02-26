@@ -1,0 +1,333 @@
+---
+title: Keys in React
+description: Understanding keys for efficient list reconciliation
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## Why Keys Matter
+
+Keys help React identify which items changed, were added, or removed. Without proper keys, React re-renders entire lists instead of just changed items.
+
+```tsx
+// Without keys: React re-renders all items on change
+{items.map(item => <ListItem item={item} />)}
+
+// With keys: React only updates changed items
+{items.map(item => <ListItem key={item.id} item={item} />)}
+```
+
+<Callout type="warn" title="Missing Keys">
+React will warn you about missing keys in development. Never ignore this warning—it indicates potential performance and correctness issues.
+</Callout>
+
+---
+
+## Key Requirements
+
+Keys must be:
+
+| Requirement | Description |
+|-------------|-------------|
+| **Unique among siblings** | Two items in the same list cannot share a key |
+| **Stable** | Same item should produce same key across renders |
+| **Predictable** | Derived from data, not randomly generated during render |
+
+```tsx
+// Good: stable, unique identifier from data
+{users.map(user => <User key={user.id} user={user} />)}
+
+// Bad: random key changes every render
+{users.map(user => <User key={Math.random()} user={user} />)}
+
+// Bad: index when list can reorder
+{users.map((user, index) => <User key={index} user={user} />)}
+```
+
+---
+
+## Index as Key
+
+### When Index is Acceptable
+
+| Scenario | Index OK? | Reason |
+|----------|-----------|--------|
+| Static list, never reordered | Yes | Items maintain position |
+| List filtered but not reordered | Yes | Order preserved |
+| List with add/remove at end only | Yes | Indices stay stable |
+| List can reorder | No | Indices don't follow items |
+| List with add/remove in middle | No | Shifts all subsequent indices |
+| Items have internal state | No | State gets mismatched |
+
+```tsx
+// Safe: static navigation items
+const navItems = ['Home', 'About', 'Contact'];
+{navItems.map((item, index) => (
+  <NavLink key={index}>{item}</NavLink>
+))}
+
+// Unsafe: sortable todo list
+{todos.map((todo, index) => (
+  <TodoItem key={index} todo={todo} />  // Bug: state jumps on reorder
+))}
+```
+
+### Index Key Bug Demonstration
+
+```tsx
+function TodoList() {
+  const [todos, setTodos] = useState([
+    { id: 1, text: 'First' },
+    { id: 2, text: 'Second' },
+  ]);
+
+  // Each TodoItem has internal "editing" state
+  // With index keys, reordering causes editing state to stay at index 0
+  // not follow the item being edited
+
+  const reverse = () => setTodos([...todos].reverse());
+
+  return (
+    <>
+      <button onClick={reverse}>Reverse</button>
+      {todos.map((todo, index) => (
+        // Wrong: editing state stays at index 0 after reverse
+        <TodoItem key={index} todo={todo} />
+      ))}
+    </>
+  );
+}
+```
+
+<Callout type="error" title="State Mismatch">
+When using index keys with stateful components, reordering causes component state to stay at the original index position, not follow the data.
+</Callout>
+
+---
+
+## Stable Key Generation
+
+### From Existing IDs
+
+```tsx
+// Database IDs
+{products.map(product => (
+  <ProductCard key={product.id} product={product} />
+))}
+
+// UUIDs
+{messages.map(message => (
+  <Message key={message.uuid} message={message} />
+))}
+
+// Slugs or unique strings
+{posts.map(post => (
+  <BlogPost key={post.slug} post={post} />
+))}
+```
+
+### Composite Keys
+
+When no single unique field exists:
+
+```tsx
+// Combine multiple fields
+{transactions.map(tx => (
+  <Transaction
+    key={`${tx.accountId}-${tx.timestamp}`}
+    transaction={tx}
+  />
+))}
+
+// For nested data
+{departments.map(dept => (
+  dept.employees.map(emp => (
+    <Employee
+      key={`${dept.id}-${emp.id}`}
+      employee={emp}
+    />
+  ))
+))}
+```
+
+### Generating Keys at Data Creation
+
+```tsx
+// Generate ID when creating data, not during render
+function addTodo(text: string) {
+  const newTodo = {
+    id: crypto.randomUUID(),  // Generate once at creation
+    text,
+    completed: false,
+  };
+  setTodos(prev => [...prev, newTodo]);
+}
+
+// Now use stable ID as key
+{todos.map(todo => (
+  <TodoItem key={todo.id} todo={todo} />
+))}
+```
+
+<Callout type="info" title="crypto.randomUUID">
+Use `crypto.randomUUID()` for generating unique IDs. It's built into modern browsers and produces cryptographically random UUIDs.
+</Callout>
+
+---
+
+## Key Prop Behavior
+
+### Keys Are Not Passed as Props
+
+```tsx
+// key is NOT available as a prop
+function Item({ key, name }: { key: string; name: string }) {
+  console.log(key);  // undefined - key is consumed by React
+  return <div>{name}</div>;
+}
+
+// Pass it separately if needed
+{items.map(item => (
+  <Item key={item.id} id={item.id} name={item.name} />
+))}
+```
+
+### Key Changes Force Remount
+
+```tsx
+function UserProfile({ userId }: { userId: string }) {
+  // Changing key forces complete unmount/remount
+  // All internal state resets
+  return (
+    <Profile key={userId} userId={userId} />
+  );
+}
+
+// Useful for resetting form state
+function EditForm({ recordId }: { recordId: string }) {
+  return (
+    // Form completely resets when recordId changes
+    <Form key={recordId} recordId={recordId} />
+  );
+}
+```
+
+<Callout type="info" title="Intentional Remount">
+Changing a key is a pattern for forcing component reset. This is cleaner than useEffect cleanup for complete state resets.
+</Callout>
+
+---
+
+## Keys and Reconciliation
+
+### How React Uses Keys
+
+```tsx
+// Initial render
+['A', 'B', 'C'].map(item => <Item key={item} />)
+// React creates: Item(A), Item(B), Item(C)
+
+// After prepending 'D'
+['D', 'A', 'B', 'C'].map(item => <Item key={item} />)
+// React creates: Item(D), reuses Item(A), Item(B), Item(C)
+
+// Without keys (using index)
+['D', 'A', 'B', 'C'].map((item, i) => <Item key={i} />)
+// React thinks: Item(0) changed D->A, Item(1) changed A->B, etc.
+// Updates ALL items instead of just inserting one
+```
+
+### Performance Comparison
+
+| Operation | With Proper Keys | With Index Keys |
+|-----------|------------------|-----------------|
+| Append item | 1 create | 1 create |
+| Prepend item | 1 create | N updates |
+| Remove middle | 1 destroy | N updates |
+| Reorder | 0 DOM changes | N updates |
+| Filter | K destroys | N updates |
+
+---
+
+## Common Key Mistakes
+
+### Mistake 1: Key on Wrong Element
+
+```tsx
+// Wrong: key on fragment wrapper
+{items.map(item => (
+  <div key={item.id}>
+    <ItemHeader item={item} />
+    <ItemBody item={item} />
+  </div>
+))}
+
+// Correct for fragments
+{items.map(item => (
+  <Fragment key={item.id}>
+    <ItemHeader item={item} />
+    <ItemBody item={item} />
+  </Fragment>
+))}
+```
+
+### Mistake 2: Non-Unique Keys
+
+```tsx
+// Bug: duplicate keys when data has duplicates
+const tags = ['react', 'typescript', 'react'];  // 'react' appears twice
+
+// Wrong: duplicate keys
+{tags.map(tag => <Tag key={tag} name={tag} />)}
+
+// Fixed: include index for uniqueness
+{tags.map((tag, index) => <Tag key={`${tag}-${index}`} name={tag} />)}
+```
+
+### Mistake 3: Key from Transformed Data
+
+```tsx
+// Bug: key changes when data is processed
+{users
+  .filter(u => u.active)
+  .sort((a, b) => a.name.localeCompare(b.name))
+  .map((user, index) => (
+    // Wrong: index changes after filter/sort
+    <User key={index} user={user} />
+  ))}
+
+// Fixed: use stable ID from original data
+{users
+  .filter(u => u.active)
+  .sort((a, b) => a.name.localeCompare(b.name))
+  .map(user => (
+    <User key={user.id} user={user} />
+  ))}
+```
+
+### Mistake 4: Object as Key
+
+```tsx
+// Wrong: objects create new reference each render
+{items.map(item => (
+  <Item key={{ id: item.id }} item={item} />  // Always re-renders
+))}
+
+// Fixed: use primitive value
+{items.map(item => (
+  <Item key={item.id} item={item} />
+))}
+```
+
+---
+
+## Quick Reference
+
+| Scenario | Recommended Key |
+|----------|-----------------|
+| Database records | `record.id` |
+| User-generated content | UUID generated at creation |
+| Static config arrays | Index (if never reordered) |
+| Composite uniqueness | `${parentId}-${childId}` |
+| Duplicate values in array | `${value}-${index}` |
+| Resetting component state | Change key intentionally |

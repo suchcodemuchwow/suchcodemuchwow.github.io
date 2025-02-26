@@ -1,0 +1,413 @@
+---
+title: Render Optimization
+description: Understanding React re-renders and structural optimization techniques
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## Understanding Re-renders
+
+A component re-renders when:
+
+1. Its state changes
+2. Its parent re-renders
+3. A context it consumes changes
+
+React does NOT re-render when:
+
+- Props are the same (with memo)
+- The component bails out early
+- The component is passed as children
+
+---
+
+## Component Tree Updates
+
+When state changes, React re-renders the component and all its descendants:
+
+```tsx
+function App() {
+  const [count, setCount] = useState(0);
+
+  return (
+    <div>
+      <button onClick={() => setCount(c => c + 1)}>{count}</button>
+      <Header />          {/* Re-renders */}
+      <Sidebar />         {/* Re-renders */}
+      <Content>           {/* Re-renders */}
+        <ExpensiveList /> {/* Re-renders */}
+      </Content>
+    </div>
+  );
+}
+```
+
+Every child re-renders regardless of whether it uses `count`.
+
+<Callout type="warn" title="Re-render vs DOM Update">
+Re-render does NOT mean DOM update. React compares the virtual DOM and only updates what changed. Still, re-rendering has CPU cost.
+</Callout>
+
+---
+
+## Bail-out Conditions
+
+React skips re-rendering a subtree when:
+
+### Same Element Reference
+
+```tsx
+function Parent({ children }: { children: ReactNode }) {
+  const [count, setCount] = useState(0);
+
+  return (
+    <div>
+      <button onClick={() => setCount(c => c + 1)}>{count}</button>
+      {children} {/* Does NOT re-render */}
+    </div>
+  );
+}
+
+// Usage - ExpensiveChild created in App, not Parent
+function App() {
+  return (
+    <Parent>
+      <ExpensiveChild />
+    </Parent>
+  );
+}
+```
+
+### Same Props with memo
+
+```tsx
+const MemoizedChild = memo(function Child({ name }: { name: string }) {
+  return <div>{name}</div>;
+});
+
+function Parent() {
+  const [count, setCount] = useState(0);
+
+  return (
+    <div>
+      <button onClick={() => setCount(c => c + 1)}>{count}</button>
+      <MemoizedChild name="Alice" /> {/* Skips re-render */}
+    </div>
+  );
+}
+```
+
+---
+
+## Moving State Down
+
+Isolate frequently-changing state to minimize re-render scope:
+
+### Before
+
+```tsx
+function ProductPage() {
+  const [isHovered, setIsHovered] = useState(false);
+
+  return (
+    <div>
+      <Header />
+      <ProductImage
+        onMouseEnter={() => setIsHovered(true)}
+        onMouseLeave={() => setIsHovered(false)}
+        isHovered={isHovered}
+      />
+      <ProductDetails />    {/* Re-renders on hover! */}
+      <RelatedProducts />   {/* Re-renders on hover! */}
+      <Reviews />           {/* Re-renders on hover! */}
+    </div>
+  );
+}
+```
+
+### After
+
+```tsx
+function ProductPage() {
+  return (
+    <div>
+      <Header />
+      <HoverableProductImage /> {/* State contained here */}
+      <ProductDetails />
+      <RelatedProducts />
+      <Reviews />
+    </div>
+  );
+}
+
+function HoverableProductImage() {
+  const [isHovered, setIsHovered] = useState(false);
+
+  return (
+    <ProductImage
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+      isHovered={isHovered}
+    />
+  );
+}
+```
+
+| Approach | Re-renders on Hover |
+|----------|---------------------|
+| Before | ProductPage + all children |
+| After | Only HoverableProductImage |
+
+---
+
+## Lifting Content Up
+
+When state must stay in a parent, pass expensive children from above:
+
+### Before
+
+```tsx
+function ScrollContainer() {
+  const [scrollY, setScrollY] = useState(0);
+
+  return (
+    <div onScroll={e => setScrollY(e.currentTarget.scrollTop)}>
+      <ScrollIndicator scrollY={scrollY} />
+      <ExpensiveContent /> {/* Re-renders 60 times/sec during scroll! */}
+    </div>
+  );
+}
+```
+
+### After
+
+```tsx
+function ScrollContainer({ children }: { children: ReactNode }) {
+  const [scrollY, setScrollY] = useState(0);
+
+  return (
+    <div onScroll={e => setScrollY(e.currentTarget.scrollTop)}>
+      <ScrollIndicator scrollY={scrollY} />
+      {children} {/* Does NOT re-render */}
+    </div>
+  );
+}
+
+// Usage
+function App() {
+  return (
+    <ScrollContainer>
+      <ExpensiveContent />
+    </ScrollContainer>
+  );
+}
+```
+
+<Callout type="info" title="Why This Works">
+`children` is created in App, not ScrollContainer. When ScrollContainer re-renders, `children` keeps the same reference because App did not re-render.
+</Callout>
+
+---
+
+## Children as Props Pattern
+
+Extract the stateful part and pass static content as children:
+
+### Generic Pattern
+
+```tsx
+interface StatefulWrapperProps {
+  children: ReactNode;
+}
+
+function StatefulWrapper({ children }: StatefulWrapperProps) {
+  const [state, setState] = useState(initialState);
+
+  return (
+    <div className={getClassFromState(state)}>
+      <Controls onChange={setState} />
+      {children} {/* Stable reference */}
+    </div>
+  );
+}
+```
+
+### Practical Example: Tabs
+
+```tsx
+function Tabs({ children }: { children: ReactNode }) {
+  const [activeTab, setActiveTab] = useState(0);
+
+  return (
+    <div>
+      <TabList activeTab={activeTab} onChange={setActiveTab} />
+      <TabPanels activeTab={activeTab}>
+        {children} {/* Tab content doesn't re-render on tab change */}
+      </TabPanels>
+    </div>
+  );
+}
+
+// Usage
+<Tabs>
+  <ExpensivePanel1 />
+  <ExpensivePanel2 />
+  <ExpensivePanel3 />
+</Tabs>
+```
+
+---
+
+## Render Props Optimization
+
+When using render props, the function creates new elements each render:
+
+### Problem
+
+```tsx
+function MouseTracker({ render }: { render: (pos: Position) => ReactNode }) {
+  const [position, setPosition] = useState({ x: 0, y: 0 });
+
+  return (
+    <div onMouseMove={e => setPosition({ x: e.clientX, y: e.clientY })}>
+      {render(position)} {/* New elements every mouse move */}
+    </div>
+  );
+}
+
+// Content re-renders on every mouse move
+<MouseTracker render={pos => <ExpensiveVisualization position={pos} />} />
+```
+
+### Solution: Split Static and Dynamic
+
+```tsx
+function MouseTracker({ children }: { children: ReactNode }) {
+  const [position, setPosition] = useState({ x: 0, y: 0 });
+
+  return (
+    <MouseContext.Provider value={position}>
+      <div onMouseMove={e => setPosition({ x: e.clientX, y: e.clientY })}>
+        <PositionDisplay /> {/* Only this uses position */}
+        {children} {/* Static content */}
+      </div>
+    </MouseContext.Provider>
+  );
+}
+```
+
+---
+
+## Comparison: Optimization Techniques
+
+| Technique | When to Use | Complexity |
+|-----------|-------------|------------|
+| Move state down | State used by subset of children | Low |
+| Lift content up | Parent state, expensive static children | Low |
+| Children as props | Wrapper components with state | Low |
+| React.memo | Expensive component, stable props | Medium |
+| useMemo/useCallback | Stabilize props for memoized children | Medium |
+
+<Callout type="info" title="Prefer Structural Solutions">
+Moving state down and lifting content up are simpler and more maintainable than memo. Try structural solutions first.
+</Callout>
+
+---
+
+## When NOT to Optimize
+
+Avoid premature optimization:
+
+```tsx
+// Don't do this for simple components
+function App() {
+  const [count, setCount] = useState(0);
+
+  return (
+    <div>
+      <button onClick={() => setCount(c => c + 1)}>{count}</button>
+      <SimpleText /> {/* Don't wrap in memo */}
+    </div>
+  );
+}
+
+function SimpleText() {
+  return <p>Hello World</p>; // Trivial to re-render
+}
+```
+
+### Optimize When
+
+- Profiler shows render time > 16ms
+- Visible lag during interaction
+- Large lists or complex calculations
+
+### Skip When
+
+- Components render quickly
+- Re-renders are infrequent
+- No user-perceptible lag
+
+---
+
+## Common Mistakes
+
+### 1. Creating Elements in Render
+
+```tsx
+// Bad: New element reference every render
+function Parent() {
+  const [count, setCount] = useState(0);
+  const child = <ExpensiveChild />; // Still re-renders!
+
+  return (
+    <div>
+      <button onClick={() => setCount(c => c + 1)}>{count}</button>
+      {child}
+    </div>
+  );
+}
+```
+
+The element is created inside Parent, so it gets a new reference each render. Move it outside or use children pattern.
+
+### 2. Inline Children with State
+
+```tsx
+// Bad: Inline children in stateful component
+function Wrapper() {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div>
+      <button onClick={() => setOpen(o => !o)}>Toggle</button>
+      {open && <ExpensiveContent />} {/* Re-renders when open changes */}
+    </div>
+  );
+}
+```
+
+Consider memo for ExpensiveContent if it's truly expensive.
+
+### 3. Ignoring Component Boundaries
+
+```tsx
+// Bad: Monolithic component
+function Dashboard() {
+  const [filter, setFilter] = useState('');
+  const [sort, setSort] = useState('date');
+  const [page, setPage] = useState(1);
+  // All state changes re-render everything
+
+  return (
+    <div>
+      <FilterBar value={filter} onChange={setFilter} />
+      <SortDropdown value={sort} onChange={setSort} />
+      <DataTable filter={filter} sort={sort} page={page} />
+      <Pagination page={page} onChange={setPage} />
+    </div>
+  );
+}
+```
+
+Split into smaller components where state is colocated with consumers.

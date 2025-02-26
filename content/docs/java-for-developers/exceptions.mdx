@@ -1,0 +1,215 @@
+---
+title: Exception Handling
+description: Error handling patterns in Java compared to JS/TS and Go
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## Exception Hierarchy
+
+```
+Throwable
+├── Error (don't catch these)
+│   ├── OutOfMemoryError
+│   └── StackOverflowError
+└── Exception
+    ├── RuntimeException (unchecked)
+    │   ├── NullPointerException
+    │   ├── IllegalArgumentException
+    │   └── IndexOutOfBoundsException
+    └── Checked Exceptions
+        ├── IOException
+        └── SQLException
+```
+
+---
+
+## Checked vs Unchecked
+
+### Checked Exceptions
+
+Must be declared or handled:
+
+```java
+public String readFile(Path path) throws IOException {
+    return Files.readString(path);  // IOException is checked
+}
+
+// Caller must handle
+try {
+    String content = readFile(Path.of("config.json"));
+} catch (IOException e) {
+    log.error("Failed to read config", e);
+    throw new ConfigurationException("Missing config file", e);
+}
+```
+
+### Unchecked Exceptions (RuntimeException)
+
+Don't require declaration:
+
+```java
+public User findById(String id) {
+    if (id == null) {
+        throw new IllegalArgumentException("id cannot be null");
+    }
+    return userRepository.findById(id)
+        .orElseThrow(() -> new UserNotFoundException(id));
+}
+```
+
+<Callout type="info" title="Go delta">
+Go uses explicit error returns (`value, err`). Java's checked exceptions force handling at compile time, but modern Java tends toward unchecked exceptions for cleaner APIs.
+</Callout>
+
+<Callout type="info" title="JS/TS delta">
+JavaScript exceptions are all unchecked. Java's checked exceptions can feel verbose, but they make failure modes explicit in the type signature.
+</Callout>
+
+---
+
+## Try-Catch-Finally
+
+```java
+FileInputStream fis = null;
+try {
+    fis = new FileInputStream("data.txt");
+    // process file
+} catch (FileNotFoundException e) {
+    log.warn("File not found, using defaults");
+} catch (IOException e) {
+    throw new DataProcessingException("Failed to read data", e);
+} finally {
+    if (fis != null) {
+        try { fis.close(); } catch (IOException ignored) {}
+    }
+}
+```
+
+---
+
+## Try-With-Resources (Preferred)
+
+Automatically closes resources:
+
+```java
+try (var fis = new FileInputStream("data.txt");
+     var reader = new BufferedReader(new InputStreamReader(fis))) {
+    return reader.lines().collect(Collectors.joining("\n"));
+} catch (IOException e) {
+    throw new DataProcessingException("Failed to read data", e);
+}
+// Resources automatically closed, even on exception
+```
+
+Resources must implement `AutoCloseable`:
+
+```java
+public class DatabaseConnection implements AutoCloseable {
+    @Override
+    public void close() {
+        // cleanup logic
+    }
+}
+```
+
+---
+
+## Custom Exceptions
+
+```java
+public class UserNotFoundException extends RuntimeException {
+    private final String userId;
+
+    public UserNotFoundException(String userId) {
+        super("User not found: " + userId);
+        this.userId = userId;
+    }
+
+    public String getUserId() {
+        return userId;
+    }
+}
+```
+
+### Exception Chaining
+
+Always preserve the original cause:
+
+```java
+try {
+    externalService.call();
+} catch (ExternalServiceException e) {
+    throw new ServiceUnavailableException("External service failed", e);
+    // The original exception is preserved as the cause
+}
+```
+
+---
+
+## Best Practices
+
+### Do
+
+```java
+// Specific exceptions
+throw new IllegalArgumentException("age must be positive: " + age);
+
+// Preserve cause
+throw new ProcessingException("Failed to process order", originalException);
+
+// Use try-with-resources
+try (var conn = dataSource.getConnection()) { ... }
+
+// Catch specific exceptions
+catch (SpecificException e) { ... }
+```
+
+### Don't
+
+```java
+// Too generic
+throw new Exception("Something went wrong");
+
+// Swallowing exceptions
+catch (Exception e) { /* empty */ }
+
+// Catching Throwable
+catch (Throwable t) { ... }  // includes Errors you shouldn't catch
+
+// Exception for control flow
+try {
+    return list.get(index);
+} catch (IndexOutOfBoundsException e) {
+    return null;  // Use bounds check instead
+}
+```
+
+---
+
+## Pattern: Result Type (Alternative to Exceptions)
+
+For expected failures, consider a result type:
+
+```java
+public sealed interface Result<T> permits Success, Failure {
+    record Success<T>(T value) implements Result<T> {}
+    record Failure<T>(String error) implements Result<T> {}
+}
+
+public Result<User> findUser(String id) {
+    return userRepository.findById(id)
+        .<Result<User>>map(Result.Success::new)
+        .orElse(new Result.Failure<>("User not found: " + id));
+}
+
+// Usage
+switch (findUser("123")) {
+    case Result.Success(var user) -> processUser(user);
+    case Result.Failure(var error) -> log.warn(error);
+}
+```
+
+<Callout type="info" title="Go delta">
+This pattern is closer to Go's `(value, error)` tuple return style, using sealed types for type safety.
+</Callout>

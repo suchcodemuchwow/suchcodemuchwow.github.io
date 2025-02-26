@@ -1,0 +1,317 @@
+---
+title: Performance Optimization
+description: Techniques to optimize React application performance
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## Golden Rules
+
+1. **Measure first** — Don't optimize blindly
+2. **Avoid premature optimization** — Ship, then optimize bottlenecks
+3. **Most performance issues are architectural** — Fix design before adding memo
+
+---
+
+## React DevTools Profiler
+
+Before optimizing, identify actual bottlenecks:
+
+1. Open React DevTools → Profiler tab
+2. Click Record, interact with your app, Stop
+3. Look for:
+   - Components rendering when they shouldn't
+   - Long render times (yellow/red flames)
+   - Frequent re-renders
+
+---
+
+## Avoiding Re-renders
+
+### The Problem
+
+Parent re-renders → All children re-render (by default)
+
+```tsx
+function Parent() {
+  const [count, setCount] = useState(0);
+
+  return (
+    <div>
+      <button onClick={() => setCount(c => c + 1)}>{count}</button>
+      <ExpensiveChild /> {/* Re-renders on every count change! */}
+    </div>
+  );
+}
+```
+
+### Solution 1: Move State Down
+
+```tsx
+function Parent() {
+  return (
+    <div>
+      <Counter /> {/* State lives here now */}
+      <ExpensiveChild /> {/* Doesn't re-render */}
+    </div>
+  );
+}
+
+function Counter() {
+  const [count, setCount] = useState(0);
+  return <button onClick={() => setCount(c => c + 1)}>{count}</button>;
+}
+```
+
+### Solution 2: Lift Content Up
+
+```tsx
+function Parent({ children }) {
+  const [count, setCount] = useState(0);
+
+  return (
+    <div>
+      <button onClick={() => setCount(c => c + 1)}>{count}</button>
+      {children} {/* Children don't re-render! */}
+    </div>
+  );
+}
+
+// Usage
+<Parent>
+  <ExpensiveChild />
+</Parent>
+```
+
+<Callout type="info" title="Why This Works">
+`children` is passed as props. Since the parent of `Parent` didn't re-render, the children reference is stable.
+</Callout>
+
+---
+
+## memo
+
+Prevent re-renders when props haven't changed:
+
+```tsx
+const ExpensiveComponent = memo(function ExpensiveComponent({ data }: Props) {
+  // Expensive rendering logic
+  return <div>{/* ... */}</div>;
+});
+```
+
+### When memo Helps
+
+- Component renders often with same props
+- Component has expensive render logic
+- Component is in a frequently-updating parent
+
+### When memo Doesn't Help
+
+```tsx
+// Won't help: new object prop every render
+<MemoizedComponent
+  user={{ name: 'Alice' }}  // New object each render!
+  onClick={() => {}}        // New function each render!
+/>
+```
+
+---
+
+## useMemo
+
+Memoize expensive calculations:
+
+```tsx
+function ProductList({ products, filter }: Props) {
+  // Only recalculates when products or filter changes
+  const filteredProducts = useMemo(
+    () => products.filter(p => p.category === filter).sort(sortFn),
+    [products, filter]
+  );
+
+  return <List items={filteredProducts} />;
+}
+```
+
+### When to Use useMemo
+
+- Expensive calculations (sorting, filtering large arrays)
+- Creating objects/arrays passed to memoized children
+- Values used in dependency arrays
+
+### When NOT to Use
+
+```tsx
+// Don't memoize cheap operations
+const fullName = useMemo(() => `${first} ${last}`, [first, last]); // Overkill
+
+// Just compute it
+const fullName = `${first} ${last}`;
+```
+
+---
+
+## useCallback
+
+Memoize functions to maintain referential equality:
+
+```tsx
+function SearchForm({ onSearch }: Props) {
+  const [query, setQuery] = useState('');
+
+  // Stable reference for memoized children
+  const handleSubmit = useCallback(() => {
+    onSearch(query);
+  }, [query, onSearch]);
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <input value={query} onChange={e => setQuery(e.target.value)} />
+      <MemoizedButton onClick={handleSubmit}>Search</MemoizedButton>
+    </form>
+  );
+}
+```
+
+### useCallback + memo Pattern
+
+```tsx
+// Parent
+const handleClick = useCallback((id: string) => {
+  setSelectedId(id);
+}, []);
+
+return items.map(item => (
+  <MemoizedItem key={item.id} item={item} onClick={handleClick} />
+));
+
+// Child
+const MemoizedItem = memo(function Item({ item, onClick }) {
+  return <div onClick={() => onClick(item.id)}>{item.name}</div>;
+});
+```
+
+---
+
+## Virtualization
+
+Render only visible items in long lists:
+
+```tsx
+import { useVirtualizer } from '@tanstack/react-virtual';
+
+function VirtualList({ items }: { items: Item[] }) {
+  const parentRef = useRef<HTMLDivElement>(null);
+
+  const virtualizer = useVirtualizer({
+    count: items.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => 50,
+  });
+
+  return (
+    <div ref={parentRef} style={{ height: 400, overflow: 'auto' }}>
+      <div style={{ height: virtualizer.getTotalSize() }}>
+        {virtualizer.getVirtualItems().map(virtualItem => (
+          <div
+            key={virtualItem.key}
+            style={{
+              position: 'absolute',
+              top: virtualItem.start,
+              height: virtualItem.size,
+            }}
+          >
+            {items[virtualItem.index].name}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+```
+
+<Callout type="info" title="When to Virtualize">
+Consider virtualization for lists with 100+ items, especially with complex item rendering.
+</Callout>
+
+---
+
+## Debouncing and Throttling
+
+### Debounce: Wait for pause in events
+
+```tsx
+function SearchInput() {
+  const [query, setQuery] = useState('');
+  const [debouncedQuery, setDebouncedQuery] = useState('');
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQuery(query), 300);
+    return () => clearTimeout(timer);
+  }, [query]);
+
+  // Use debouncedQuery for API calls
+  const { data } = useQuery(['search', debouncedQuery], () =>
+    search(debouncedQuery)
+  );
+
+  return <input value={query} onChange={e => setQuery(e.target.value)} />;
+}
+```
+
+### useDeferredValue (React 18+)
+
+Let React manage the deferral:
+
+```tsx
+function SearchResults({ query }: { query: string }) {
+  const deferredQuery = useDeferredValue(query);
+
+  const results = useMemo(
+    () => expensiveFilter(items, deferredQuery),
+    [deferredQuery]
+  );
+
+  return <List items={results} />;
+}
+```
+
+---
+
+## Common Mistakes
+
+### 1. Inline Object/Array Props
+
+```tsx
+// Bad: New array every render
+<Chart data={[1, 2, 3]} />
+
+// Good: Stable reference
+const data = useMemo(() => [1, 2, 3], []);
+<Chart data={data} />
+```
+
+### 2. Unstable Keys
+
+```tsx
+// Bad: Random keys force remount
+{items.map((item, i) => (
+  <Item key={Math.random()} item={item} />
+))}
+
+// Good: Stable, unique keys
+{items.map(item => (
+  <Item key={item.id} item={item} />
+))}
+```
+
+### 3. Over-memoization
+
+```tsx
+// Don't do this
+const Component = memo(({ onClick }) => {
+  const memoizedClick = useCallback(onClick, [onClick]); // Pointless
+  const memoizedValue = useMemo(() => 'static', []); // Pointless
+});
+```

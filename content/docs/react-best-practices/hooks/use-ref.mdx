@@ -1,0 +1,489 @@
+---
+title: useRef Patterns
+description: Using refs for DOM access and mutable values in React
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## DOM References
+
+The primary use case: access DOM elements directly.
+
+```tsx
+function TextInput() {
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const focusInput = () => {
+    inputRef.current?.focus();
+  };
+
+  return (
+    <div>
+      <input ref={inputRef} type="text" />
+      <button onClick={focusInput}>Focus Input</button>
+    </div>
+  );
+}
+```
+
+### Common DOM Operations
+
+```tsx
+function VideoPlayer({ src }: { src: string }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  const play = () => videoRef.current?.play();
+  const pause = () => videoRef.current?.pause();
+  const seekTo = (time: number) => {
+    if (videoRef.current) {
+      videoRef.current.currentTime = time;
+    }
+  };
+
+  return (
+    <div>
+      <video ref={videoRef} src={src} />
+      <button onClick={play}>Play</button>
+      <button onClick={pause}>Pause</button>
+      <button onClick={() => seekTo(0)}>Restart</button>
+    </div>
+  );
+}
+```
+
+### TypeScript: Ref Types
+
+| Element | Type |
+|---------|------|
+| `<input>` | `HTMLInputElement` |
+| `<button>` | `HTMLButtonElement` |
+| `<div>` | `HTMLDivElement` |
+| `<form>` | `HTMLFormElement` |
+| `<canvas>` | `HTMLCanvasElement` |
+| `<video>` | `HTMLVideoElement` |
+| `<audio>` | `HTMLAudioElement` |
+
+---
+
+## Mutable Values Without Re-render
+
+Refs persist across renders without causing re-renders when changed.
+
+```tsx
+function StopWatch() {
+  const [time, setTime] = useState(0);
+  const intervalRef = useRef<number | null>(null);
+
+  const start = () => {
+    if (intervalRef.current !== null) return;
+
+    intervalRef.current = window.setInterval(() => {
+      setTime(t => t + 1);
+    }, 1000);
+  };
+
+  const stop = () => {
+    if (intervalRef.current !== null) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+  };
+
+  const reset = () => {
+    stop();
+    setTime(0);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (intervalRef.current !== null) {
+        clearInterval(intervalRef.current);
+      }
+    };
+  }, []);
+
+  return (
+    <div>
+      <span>{time}s</span>
+      <button onClick={start}>Start</button>
+      <button onClick={stop}>Stop</button>
+      <button onClick={reset}>Reset</button>
+    </div>
+  );
+}
+```
+
+<Callout type="info" title="When to Use Refs for Values">
+Use refs for values that don't affect rendering: timer IDs, previous values, flags, DOM measurements, or any value you need to read in event handlers without triggering re-renders.
+</Callout>
+
+---
+
+## Previous Value Pattern
+
+Track the previous value of props or state:
+
+```tsx
+function usePrevious<T>(value: T): T | undefined {
+  const ref = useRef<T | undefined>(undefined);
+
+  useEffect(() => {
+    ref.current = value;
+  });
+
+  return ref.current;
+}
+
+// Usage
+function Counter() {
+  const [count, setCount] = useState(0);
+  const prevCount = usePrevious(count);
+
+  return (
+    <div>
+      <p>Current: {count}, Previous: {prevCount}</p>
+      <button onClick={() => setCount(c => c + 1)}>Increment</button>
+    </div>
+  );
+}
+```
+
+### How It Works
+
+1. Component renders with new value
+2. `usePrevious` returns `ref.current` (old value)
+3. After render, effect runs and updates `ref.current` to new value
+4. Next render returns this value as "previous"
+
+---
+
+## Instance Variables
+
+Store values that persist across renders but don't need to trigger re-renders:
+
+```tsx
+function Chat({ roomId }: { roomId: string }) {
+  const [messages, setMessages] = useState<Message[]>([]);
+  const connectionRef = useRef<WebSocket | null>(null);
+  const reconnectAttemptsRef = useRef(0);
+
+  useEffect(() => {
+    const connect = () => {
+      connectionRef.current = new WebSocket(`/chat/${roomId}`);
+
+      connectionRef.current.onopen = () => {
+        reconnectAttemptsRef.current = 0;
+      };
+
+      connectionRef.current.onmessage = (event) => {
+        setMessages(prev => [...prev, JSON.parse(event.data)]);
+      };
+
+      connectionRef.current.onclose = () => {
+        if (reconnectAttemptsRef.current < 3) {
+          reconnectAttemptsRef.current += 1;
+          setTimeout(connect, 1000 * reconnectAttemptsRef.current);
+        }
+      };
+    };
+
+    connect();
+
+    return () => {
+      connectionRef.current?.close();
+    };
+  }, [roomId]);
+
+  const sendMessage = (text: string) => {
+    connectionRef.current?.send(JSON.stringify({ text }));
+  };
+
+  return (/* ... */);
+}
+```
+
+---
+
+## Ref vs State Decision
+
+| Need | Use | Why |
+|------|-----|-----|
+| Value displayed in UI | State | Changes must trigger re-render |
+| Value used in JSX | State | Need re-render to show update |
+| Timer/interval ID | Ref | No UI representation |
+| Previous value | Ref | Shouldn't trigger re-render |
+| DOM element | Ref | Direct access, no re-render needed |
+| Mutable flag (e.g., isMounted) | Ref | Checking doesn't need re-render |
+| Cache/memo between renders | Ref | Persist without re-render |
+
+<Callout type="warn" title="Don't Read Refs During Render">
+Reading `ref.current` during render can lead to inconsistent UI. Refs are for values you read in event handlers, effects, or callbacks.
+</Callout>
+
+```tsx
+// Bad: reading ref during render
+function BadComponent() {
+  const countRef = useRef(0);
+
+  // This shows stale value because ref changes don't trigger re-render
+  return <div>{countRef.current}</div>;
+}
+
+// Good: use state if you need to display it
+function GoodComponent() {
+  const [count, setCount] = useState(0);
+  return <div>{count}</div>;
+}
+```
+
+---
+
+## Callback Refs
+
+For dynamic ref assignment or when you need to run code when a ref is attached:
+
+```tsx
+function MeasuredComponent() {
+  const [height, setHeight] = useState(0);
+
+  const measuredRef = useCallback((node: HTMLDivElement | null) => {
+    if (node !== null) {
+      setHeight(node.getBoundingClientRect().height);
+    }
+  }, []);
+
+  return (
+    <div ref={measuredRef}>
+      <p>This content has variable height</p>
+      <p>Measured height: {height}px</p>
+    </div>
+  );
+}
+```
+
+### When to Use Callback Refs
+
+| Scenario | Object Ref | Callback Ref |
+|----------|-----------|--------------|
+| Simple DOM access | Yes | Overkill |
+| Measure on mount | No | Yes |
+| Conditional rendering | Sometimes | Better |
+| Multiple elements | No | Yes |
+| Run code on attach | No | Yes |
+
+### Dynamic List of Refs
+
+```tsx
+function ItemList({ items }: { items: Item[] }) {
+  const itemRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+
+  const scrollToItem = (id: string) => {
+    const element = itemRefs.current.get(id);
+    element?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  return (
+    <div>
+      {items.map(item => (
+        <div
+          key={item.id}
+          ref={(node) => {
+            if (node) {
+              itemRefs.current.set(item.id, node);
+            } else {
+              itemRefs.current.delete(item.id);
+            }
+          }}
+        >
+          {item.name}
+        </div>
+      ))}
+    </div>
+  );
+}
+```
+
+---
+
+## Forwarding Refs
+
+Allow parent components to access child DOM elements:
+
+```tsx
+interface InputProps {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+}
+
+const LabeledInput = forwardRef<HTMLInputElement, InputProps>(
+  function LabeledInput({ label, value, onChange }, ref) {
+    return (
+      <label>
+        {label}
+        <input
+          ref={ref}
+          value={value}
+          onChange={e => onChange(e.target.value)}
+        />
+      </label>
+    );
+  }
+);
+
+// Usage
+function Form() {
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  return (
+    <form>
+      <LabeledInput
+        ref={inputRef}
+        label="Name"
+        value={name}
+        onChange={setName}
+      />
+      <button onClick={() => inputRef.current?.focus()}>
+        Focus Input
+      </button>
+    </form>
+  );
+}
+```
+
+### useImperativeHandle
+
+Expose custom methods instead of the DOM element:
+
+```tsx
+interface InputHandle {
+  focus: () => void;
+  clear: () => void;
+  getValue: () => string;
+}
+
+const CustomInput = forwardRef<InputHandle, InputProps>(
+  function CustomInput({ label }, ref) {
+    const inputRef = useRef<HTMLInputElement>(null);
+
+    useImperativeHandle(ref, () => ({
+      focus: () => inputRef.current?.focus(),
+      clear: () => {
+        if (inputRef.current) {
+          inputRef.current.value = '';
+        }
+      },
+      getValue: () => inputRef.current?.value ?? ''
+    }), []);
+
+    return <input ref={inputRef} />;
+  }
+);
+
+// Usage
+function Form() {
+  const inputHandle = useRef<InputHandle>(null);
+
+  const handleSubmit = () => {
+    const value = inputHandle.current?.getValue();
+    console.log(value);
+    inputHandle.current?.clear();
+  };
+}
+```
+
+---
+
+## Common Patterns
+
+### Debounced Input
+
+```tsx
+function DebouncedSearch({ onSearch }: { onSearch: (query: string) => void }) {
+  const [query, setQuery] = useState('');
+  const timeoutRef = useRef<number | null>(null);
+
+  const handleChange = (e: ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setQuery(value);
+
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+    }
+
+    timeoutRef.current = window.setTimeout(() => {
+      onSearch(value);
+    }, 300);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+    };
+  }, []);
+
+  return <input value={query} onChange={handleChange} />;
+}
+```
+
+### Is Mounted Check
+
+```tsx
+function useIsMounted() {
+  const isMounted = useRef(false);
+
+  useEffect(() => {
+    isMounted.current = true;
+    return () => {
+      isMounted.current = false;
+    };
+  }, []);
+
+  return isMounted;
+}
+
+// Usage
+function AsyncComponent() {
+  const [data, setData] = useState(null);
+  const isMounted = useIsMounted();
+
+  const loadData = async () => {
+    const result = await fetchData();
+    if (isMounted.current) {
+      setData(result);
+    }
+  };
+}
+```
+
+---
+
+## Quick Reference
+
+```tsx
+// DOM ref
+const divRef = useRef<HTMLDivElement>(null);
+<div ref={divRef} />
+divRef.current?.focus();
+
+// Mutable value
+const countRef = useRef(0);
+countRef.current += 1; // No re-render
+
+// Callback ref
+const callbackRef = useCallback((node: HTMLElement | null) => {
+  if (node) measure(node);
+}, []);
+
+// Forward ref
+const Component = forwardRef<HTMLInputElement, Props>((props, ref) => (
+  <input ref={ref} {...props} />
+));
+
+// Imperative handle
+useImperativeHandle(ref, () => ({
+  customMethod: () => { /* ... */ }
+}), []);
+```

@@ -1,0 +1,255 @@
+---
+title: Streams API
+description: Functional-style data processing in Java
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## Stream Basics
+
+Streams provide functional-style operations on collections:
+
+```java
+List<String> names = List.of("Alice", "Bob", "Charlie", "David");
+
+List<String> result = names.stream()
+    .filter(name -> name.length() > 3)
+    .map(String::toUpperCase)
+    .sorted()
+    .toList();
+// ["ALICE", "CHARLIE", "DAVID"]
+```
+
+<Callout type="info" title="JS/TS delta">
+Java streams are similar to array methods like `filter`, `map`, `reduce`. Key difference: Java streams are lazily evaluated and can only be consumed once.
+</Callout>
+
+---
+
+## Creating Streams
+
+```java
+// From collections
+List<String> list = List.of("a", "b", "c");
+Stream<String> stream = list.stream();
+
+// From values
+Stream<Integer> numbers = Stream.of(1, 2, 3, 4, 5);
+
+// From array
+String[] array = {"a", "b", "c"};
+Stream<String> fromArray = Arrays.stream(array);
+
+// Infinite streams
+Stream<Integer> infinite = Stream.iterate(0, n -> n + 1);
+Stream<Double> randoms = Stream.generate(Math::random);
+
+// Range
+IntStream range = IntStream.range(0, 10);  // 0-9
+IntStream rangeClosed = IntStream.rangeClosed(1, 10);  // 1-10
+```
+
+---
+
+## Intermediate Operations
+
+Operations that return a new stream (lazy):
+
+### filter
+
+```java
+List<User> adults = users.stream()
+    .filter(user -> user.age() >= 18)
+    .toList();
+```
+
+### map
+
+```java
+List<String> names = users.stream()
+    .map(User::name)
+    .toList();
+```
+
+### flatMap
+
+Flatten nested structures:
+
+```java
+List<Order> allOrders = customers.stream()
+    .flatMap(customer -> customer.orders().stream())
+    .toList();
+```
+
+### distinct, sorted, limit, skip
+
+```java
+List<Integer> result = numbers.stream()
+    .distinct()           // remove duplicates
+    .sorted()             // natural order
+    .limit(10)            // take first 10
+    .skip(5)              // skip first 5
+    .toList();
+```
+
+---
+
+## Terminal Operations
+
+Operations that produce a result (eager):
+
+### collect
+
+```java
+// To list
+List<String> list = stream.toList();  // Java 16+
+List<String> list = stream.collect(Collectors.toList());
+
+// To set
+Set<String> set = stream.collect(Collectors.toSet());
+
+// To map
+Map<String, User> byId = users.stream()
+    .collect(Collectors.toMap(User::id, user -> user));
+
+// Grouping
+Map<String, List<User>> byDepartment = users.stream()
+    .collect(Collectors.groupingBy(User::department));
+
+// Joining strings
+String names = users.stream()
+    .map(User::name)
+    .collect(Collectors.joining(", "));
+```
+
+### reduce
+
+```java
+int sum = numbers.stream()
+    .reduce(0, Integer::sum);
+
+Optional<Integer> max = numbers.stream()
+    .reduce(Integer::max);
+```
+
+### find, match
+
+```java
+Optional<User> first = users.stream()
+    .filter(u -> u.age() > 30)
+    .findFirst();
+
+boolean anyAdult = users.stream()
+    .anyMatch(u -> u.age() >= 18);
+
+boolean allAdults = users.stream()
+    .allMatch(u -> u.age() >= 18);
+
+boolean noMinors = users.stream()
+    .noneMatch(u -> u.age() < 18);
+```
+
+### forEach
+
+```java
+users.stream()
+    .filter(User::isActive)
+    .forEach(user -> sendEmail(user));
+```
+
+<Callout type="warn" title="Side Effects">
+Avoid side effects in stream operations. Prefer collecting results over mutating external state in forEach.
+</Callout>
+
+---
+
+## Primitive Streams
+
+Avoid boxing overhead with specialized streams:
+
+```java
+IntStream intStream = IntStream.of(1, 2, 3);
+LongStream longStream = LongStream.range(0, 1000000);
+DoubleStream doubleStream = DoubleStream.of(1.1, 2.2, 3.3);
+
+// Converting
+IntStream ints = users.stream()
+    .mapToInt(User::age);
+
+Stream<Integer> boxed = ints.boxed();
+
+// Aggregations
+int sum = intStream.sum();
+OptionalDouble avg = intStream.average();
+IntSummaryStatistics stats = intStream.summaryStatistics();
+```
+
+---
+
+## Parallel Streams
+
+```java
+long count = hugeList.parallelStream()
+    .filter(item -> expensiveCheck(item))
+    .count();
+```
+
+<Callout type="warn" title="Use With Care">
+Parallel streams use the common ForkJoinPool. They help with CPU-bound work on large datasets, but add overhead for small collections or I/O-bound tasks.
+</Callout>
+
+### When to Use Parallel Streams
+
+| Use | Avoid |
+|-----|-------|
+| Large datasets (10,000+ elements) | Small collections |
+| CPU-intensive operations | I/O-bound operations |
+| Stateless, independent operations | Operations with shared state |
+| ArrayList, arrays | LinkedList, Streams with limit() |
+
+---
+
+## Common Patterns
+
+### Optional with Streams
+
+```java
+Optional<User> user = findUser(id);
+
+// Map on Optional
+Optional<String> name = user.map(User::name);
+
+// Stream from Optional
+user.stream()
+    .flatMap(u -> u.orders().stream())
+    .forEach(this::processOrder);
+```
+
+### Collecting to Custom Types
+
+```java
+record Statistics(int count, double average, int max) {}
+
+Statistics stats = numbers.stream()
+    .collect(Collectors.teeing(
+        Collectors.counting(),
+        Collectors.averagingInt(Integer::intValue),
+        (count, avg) -> new Statistics(count.intValue(), avg,
+            numbers.stream().max(Integer::compare).orElse(0))
+    ));
+```
+
+### Handling Checked Exceptions
+
+```java
+// Wrap in unchecked exception
+List<String> contents = paths.stream()
+    .map(path -> {
+        try {
+            return Files.readString(path);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    })
+    .toList();
+```

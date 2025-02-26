@@ -1,0 +1,402 @@
+---
+title: React Utility Types
+description: Essential React utility types including ComponentProps, PropsWithChildren, HTMLAttributes, and other built-in type helpers.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## Overview
+
+React and TypeScript provide utility types that simplify common typing patterns. These types help you extract, transform, and compose component prop types without manual duplication.
+
+## ComponentProps
+
+Extract props from any component, including HTML elements.
+
+### From HTML Elements
+
+```tsx
+type ButtonProps = React.ComponentProps<'button'>;
+type InputProps = React.ComponentProps<'input'>;
+type DivProps = React.ComponentProps<'div'>;
+
+// Use to extend HTML element props
+interface CustomButtonProps extends React.ComponentProps<'button'> {
+  variant: 'primary' | 'secondary';
+}
+
+function CustomButton({ variant, ...buttonProps }: CustomButtonProps) {
+  return (
+    <button className={`btn-${variant}`} {...buttonProps} />
+  );
+}
+```
+
+### From Custom Components
+
+```tsx
+import { Button } from './Button';
+
+type ButtonProps = React.ComponentProps<typeof Button>;
+
+// Extract specific prop types
+type ButtonVariant = React.ComponentProps<typeof Button>['variant'];
+```
+
+<Callout type="info">
+`ComponentProps` is preferred over manually redefining prop types. It ensures your types stay in sync with the actual component.
+</Callout>
+
+## ComponentPropsWithoutRef
+
+Same as `ComponentProps` but excludes the `ref` prop. Useful when you don't support ref forwarding.
+
+```tsx
+type DivPropsNoRef = React.ComponentPropsWithoutRef<'div'>;
+
+interface CardProps extends React.ComponentPropsWithoutRef<'div'> {
+  title: string;
+}
+
+function Card({ title, children, ...divProps }: CardProps) {
+  return (
+    <div {...divProps}>
+      <h2>{title}</h2>
+      {children}
+    </div>
+  );
+}
+```
+
+## ComponentPropsWithRef
+
+Includes the ref prop, typed for the specific element.
+
+```tsx
+type InputPropsWithRef = React.ComponentPropsWithRef<'input'>;
+
+interface FormInputProps extends React.ComponentPropsWithRef<'input'> {
+  label: string;
+  error?: string;
+}
+
+const FormInput = forwardRef<HTMLInputElement, Omit<FormInputProps, 'ref'>>(
+  ({ label, error, ...inputProps }, ref) => {
+    return (
+      <div className="form-field">
+        <label>{label}</label>
+        <input ref={ref} {...inputProps} />
+        {error && <span className="error">{error}</span>}
+      </div>
+    );
+  }
+);
+```
+
+## PropsWithChildren
+
+Adds optional `children` prop to your type.
+
+```tsx
+type PropsWithChildren<P = unknown> = P & { children?: React.ReactNode };
+
+// Usage
+interface PanelProps {
+  title: string;
+  collapsible?: boolean;
+}
+
+function Panel({ title, collapsible, children }: React.PropsWithChildren<PanelProps>) {
+  return (
+    <div className="panel">
+      <header>{title}</header>
+      <div className="panel-body">{children}</div>
+    </div>
+  );
+}
+```
+
+<Callout type="warn">
+Since React 18, `children` is no longer implicitly included in `React.FC`. Use `PropsWithChildren` when you need children support.
+</Callout>
+
+## HTMLAttributes
+
+Type for standard HTML attributes on specific elements.
+
+```tsx
+interface CustomDivProps extends React.HTMLAttributes<HTMLDivElement> {
+  customProp: string;
+}
+
+interface CustomInputProps extends React.InputHTMLAttributes<HTMLInputElement> {
+  label: string;
+}
+
+interface CustomButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
+  loading?: boolean;
+}
+
+function LoadingButton({ loading, children, disabled, ...props }: CustomButtonProps) {
+  return (
+    <button disabled={disabled || loading} {...props}>
+      {loading ? 'Loading...' : children}
+    </button>
+  );
+}
+```
+
+### Common HTML Attribute Types
+
+| Type | For Element |
+|------|-------------|
+| `React.HTMLAttributes<HTMLDivElement>` | `<div>` |
+| `React.InputHTMLAttributes<HTMLInputElement>` | `<input>` |
+| `React.ButtonHTMLAttributes<HTMLButtonElement>` | `<button>` |
+| `React.AnchorHTMLAttributes<HTMLAnchorElement>` | `<a>` |
+| `React.FormHTMLAttributes<HTMLFormElement>` | `<form>` |
+| `React.TextareaHTMLAttributes<HTMLTextAreaElement>` | `<textarea>` |
+| `React.SelectHTMLAttributes<HTMLSelectElement>` | `<select>` |
+| `React.ImgHTMLAttributes<HTMLImageElement>` | `<img>` |
+| `React.TableHTMLAttributes<HTMLTableElement>` | `<table>` |
+| `React.SVGAttributes<SVGElement>` | SVG elements |
+
+## ElementType and ElementRef
+
+### ElementType
+
+Represents any valid React element type (string tags or components).
+
+```tsx
+interface PolymorphicProps<T extends React.ElementType> {
+  as?: T;
+  children?: React.ReactNode;
+}
+
+type Props<T extends React.ElementType> = PolymorphicProps<T> &
+  Omit<React.ComponentPropsWithoutRef<T>, keyof PolymorphicProps<T>>;
+
+function Box<T extends React.ElementType = 'div'>({
+  as,
+  ...props
+}: Props<T>) {
+  const Component = as || 'div';
+  return <Component {...props} />;
+}
+
+// Usage
+<Box>Default div</Box>
+<Box as="section">Section element</Box>
+<Box as="a" href="/home">Link element</Box>
+```
+
+### ElementRef
+
+Extract the ref type from an element or component.
+
+```tsx
+type InputRef = React.ElementRef<'input'>; // HTMLInputElement
+type ButtonRef = React.ElementRef<'button'>; // HTMLButtonElement
+type DivRef = React.ElementRef<'div'>; // HTMLDivElement
+
+// With custom components
+import { CustomInput } from './CustomInput';
+type CustomInputRef = React.ElementRef<typeof CustomInput>;
+```
+
+## ReactNode vs ReactElement
+
+### ReactNode
+
+The most inclusive type for renderable content.
+
+```tsx
+type ReactNode =
+  | ReactElement
+  | string
+  | number
+  | boolean
+  | null
+  | undefined
+  | ReactFragment
+  | ReactPortal;
+
+interface ContainerProps {
+  children: React.ReactNode; // Accepts anything renderable
+}
+```
+
+### ReactElement
+
+Specifically a JSX element (result of createElement).
+
+```tsx
+interface WrapperProps {
+  child: React.ReactElement; // Only JSX elements
+}
+
+function Wrapper({ child }: WrapperProps) {
+  return React.cloneElement(child, { className: 'wrapped' });
+}
+```
+
+### Comparison
+
+| Type | Accepts | Use Case |
+|------|---------|----------|
+| `ReactNode` | Everything renderable | General children |
+| `ReactElement` | JSX elements only | cloneElement, single child manipulation |
+| `string` | Strings only | Text-only components |
+| `JSX.Element` | JSX elements | Alias for ReactElement |
+
+## CSSProperties
+
+Type for inline styles.
+
+```tsx
+interface StyledBoxProps {
+  style?: React.CSSProperties;
+  customStyles?: {
+    container?: React.CSSProperties;
+    header?: React.CSSProperties;
+  };
+}
+
+function StyledBox({ style, customStyles }: StyledBoxProps) {
+  const defaultStyle: React.CSSProperties = {
+    display: 'flex',
+    flexDirection: 'column',
+    padding: '1rem',
+  };
+
+  return (
+    <div style={{ ...defaultStyle, ...style, ...customStyles?.container }}>
+      <header style={customStyles?.header}>Content</header>
+    </div>
+  );
+}
+```
+
+## RefObject and MutableRefObject
+
+```tsx
+// RefObject - for DOM refs (readonly)
+const inputRef: React.RefObject<HTMLInputElement> = useRef(null);
+
+// MutableRefObject - for mutable values
+const countRef: React.MutableRefObject<number> = useRef(0);
+
+// Inferred types from useRef
+const ref1 = useRef<HTMLInputElement>(null); // RefObject<HTMLInputElement>
+const ref2 = useRef<number>(0); // MutableRefObject<number>
+```
+
+<Callout type="info">
+When initial value is `null` and type parameter excludes `null`, TypeScript infers `RefObject`. Otherwise, it infers `MutableRefObject`.
+</Callout>
+
+## Dispatch and SetStateAction
+
+For typing state setters passed as props.
+
+```tsx
+interface ControlledInputProps {
+  value: string;
+  setValue: React.Dispatch<React.SetStateAction<string>>;
+}
+
+function ControlledInput({ value, setValue }: ControlledInputProps) {
+  return (
+    <input
+      value={value}
+      onChange={(e) => setValue(e.target.value)}
+    />
+  );
+}
+
+// Parent component
+function Parent() {
+  const [text, setText] = useState('');
+  return <ControlledInput value={text} setValue={setText} />;
+}
+```
+
+## Utility Types Summary Table
+
+| Type | Purpose | Common Use |
+|------|---------|------------|
+| `ComponentProps<T>` | Extract component props | Extending components |
+| `ComponentPropsWithoutRef<T>` | Props without ref | Non-forwarding wrappers |
+| `ComponentPropsWithRef<T>` | Props with typed ref | forwardRef components |
+| `PropsWithChildren<P>` | Add children to props | Container components |
+| `HTMLAttributes<T>` | HTML element attributes | Custom HTML wrappers |
+| `ElementType` | Any element type | Polymorphic components |
+| `ElementRef<T>` | Ref type for element | forwardRef typing |
+| `ReactNode` | Any renderable | General children |
+| `ReactElement` | JSX elements | cloneElement, single child |
+| `CSSProperties` | Inline styles | style prop typing |
+| `Dispatch<SetStateAction<T>>` | State setter | Lifting state |
+
+## Pros and Cons
+
+### Using Built-in Utility Types
+
+| Pros | Cons |
+|------|------|
+| Stay in sync with React types | Learning curve |
+| DRY - no type duplication | Can be verbose |
+| IDE autocomplete | Some edge cases need workarounds |
+| Well tested and maintained | Updates may introduce changes |
+
+### Manual Type Definitions
+
+| Pros | Cons |
+|------|------|
+| Full control | Maintenance burden |
+| Simpler to understand | Can drift from actual types |
+| No dependency on React types | Duplication across components |
+
+## When to Use
+
+| Utility Type | Use When |
+|--------------|----------|
+| `ComponentProps` | Wrapping or extending existing components |
+| `PropsWithChildren` | Component accepts children |
+| `HTMLAttributes` | Building custom HTML element wrappers |
+| `ElementType` | Building polymorphic components |
+| `ReactNode` | Accepting any renderable content |
+| `CSSProperties` | Accepting style prop |
+
+## When NOT to Use
+
+| Utility Type | Avoid When |
+|--------------|------------|
+| `ComponentProps` | You need only a few specific props (pick them) |
+| `HTMLAttributes` | Component doesn't expose HTML attributes |
+| `ReactNode` | You need specific element types |
+| `any` for children | Always prefer `ReactNode` |
+
+## Best Practices
+
+1. **Prefer `ComponentProps`** over manual prop type extraction
+2. **Use `PropsWithChildren`** explicitly for clarity
+3. **Choose the right level** of HTML attributes extension
+4. **Document polymorphic components** clearly
+5. **Export prop types** for library components
+
+```tsx
+// Export props for consumers
+export interface AlertProps extends React.HTMLAttributes<HTMLDivElement> {
+  severity: 'info' | 'warning' | 'error';
+  onClose?: () => void;
+}
+
+export function Alert({ severity, onClose, children, ...divProps }: AlertProps) {
+  return (
+    <div role="alert" className={`alert-${severity}`} {...divProps}>
+      {children}
+      {onClose && <button onClick={onClose}>Close</button>}
+    </div>
+  );
+}
+```

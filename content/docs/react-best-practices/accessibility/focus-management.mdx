@@ -1,0 +1,628 @@
+---
+title: Focus Management
+description: Control keyboard focus in React applications for accessible navigation and interaction patterns.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## Why Focus Management Matters
+
+Proper focus management ensures keyboard users can navigate your application predictably and efficiently.
+
+## Focus Order (tabIndex)
+
+The `tabIndex` attribute controls whether and when an element receives focus.
+
+### tabIndex Values
+
+| Value | Behavior |
+|-------|----------|
+| Not set | Default (focusable if interactive element) |
+| `0` | Focusable in DOM order |
+| `-1` | Focusable only via JavaScript |
+| `> 0` | Avoid - disrupts natural order |
+
+```tsx
+// Default - interactive elements are focusable
+<button>Focusable by default</button>
+<a href="/page">Focusable by default</a>
+<input type="text" />
+
+// tabIndex={0} - add non-interactive to tab order
+<div tabIndex={0} role="button" onClick={handleClick}>
+  Now focusable
+</div>
+
+// tabIndex={-1} - programmatic focus only
+<div tabIndex={-1} ref={ref}>
+  Focus via ref.current.focus()
+</div>
+```
+
+<Callout type="warn">
+Never use `tabIndex` values greater than 0. It breaks the natural reading order and confuses keyboard users.
+</Callout>
+
+### Removing from Tab Order
+
+```tsx
+// Disable removes from tab order
+<button disabled>Not focusable</button>
+
+// tabIndex={-1} keeps element but removes from tab order
+<button tabIndex={-1}>Skip in tab order</button>
+
+// inert removes entire subtree from focus and AT
+<div inert>
+  <button>Not focusable</button>
+  <input />
+</div>
+```
+
+## Programmatic Focus (useRef)
+
+Use refs to control focus programmatically.
+
+### Basic Focus Management
+
+```tsx
+import { useRef } from 'react';
+
+function SearchForm() {
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const handleButtonClick = () => {
+    inputRef.current?.focus();
+  };
+
+  return (
+    <div>
+      <input ref={inputRef} type="search" placeholder="Search..." />
+      <button type="button" onClick={handleButtonClick}>
+        Focus Search
+      </button>
+    </div>
+  );
+}
+```
+
+### Focus After State Change
+
+```tsx
+import { useRef, useEffect, useState } from 'react';
+
+function EditableField({ initialValue }: { initialValue: string }) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(initialValue);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (editing) {
+      inputRef.current?.focus();
+    }
+  }, [editing]);
+
+  const handleSave = () => {
+    setEditing(false);
+    // Return focus to edit button
+    buttonRef.current?.focus();
+  };
+
+  if (editing) {
+    return (
+      <div>
+        <input
+          ref={inputRef}
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+        />
+        <button type="button" onClick={handleSave}>
+          Save
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <span>{value}</span>
+      <button
+        ref={buttonRef}
+        type="button"
+        onClick={() => setEditing(true)}
+      >
+        Edit
+      </button>
+    </div>
+  );
+}
+```
+
+### Focus on Mount
+
+```tsx
+import { useRef, useEffect } from 'react';
+
+function AutofocusInput() {
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
+  return <input ref={inputRef} type="text" />;
+}
+```
+
+<Callout type="info">
+The native `autoFocus` attribute works but fires before React's commit phase. Use `useEffect` for more control.
+</Callout>
+
+## Focus Trapping (Modals)
+
+Modals must trap focus to prevent users from tabbing to hidden content.
+
+### Modal with Focus Trap
+
+```tsx
+import { useRef, useEffect, useCallback } from 'react';
+
+interface ModalProps {
+  open: boolean;
+  onClose: () => void;
+  children: React.ReactNode;
+}
+
+function Modal({ open, onClose, children }: ModalProps) {
+  const modalRef = useRef<HTMLDivElement>(null);
+  const previousFocus = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (open) {
+      // Store current focus
+      previousFocus.current = document.activeElement as HTMLElement;
+      // Focus first focusable element in modal
+      const firstFocusable = modalRef.current?.querySelector<HTMLElement>(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+      );
+      firstFocusable?.focus();
+    }
+
+    return () => {
+      // Restore focus when closing
+      previousFocus.current?.focus();
+    };
+  }, [open]);
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'Escape') {
+      onClose();
+      return;
+    }
+
+    if (e.key !== 'Tab') return;
+
+    const focusableElements = modalRef.current?.querySelectorAll<HTMLElement>(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+    );
+
+    if (!focusableElements?.length) return;
+
+    const firstElement = focusableElements[0];
+    const lastElement = focusableElements[focusableElements.length - 1];
+
+    // Trap focus within modal
+    if (e.shiftKey && document.activeElement === firstElement) {
+      e.preventDefault();
+      lastElement.focus();
+    } else if (!e.shiftKey && document.activeElement === lastElement) {
+      e.preventDefault();
+      firstElement.focus();
+    }
+  }, [onClose]);
+
+  if (!open) return null;
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="modal-title"
+      ref={modalRef}
+      onKeyDown={handleKeyDown}
+    >
+      <h2 id="modal-title">Modal Title</h2>
+      {children}
+      <button type="button" onClick={onClose}>
+        Close
+      </button>
+    </div>
+  );
+}
+```
+
+### Using inert for Background
+
+```tsx
+function App() {
+  const [modalOpen, setModalOpen] = useState(false);
+
+  return (
+    <>
+      <div inert={modalOpen || undefined}>
+        <header>...</header>
+        <main>
+          <button onClick={() => setModalOpen(true)}>
+            Open Modal
+          </button>
+        </main>
+      </div>
+
+      {modalOpen && (
+        <Modal onClose={() => setModalOpen(false)}>
+          Modal content
+        </Modal>
+      )}
+    </>
+  );
+}
+```
+
+<Callout type="info">
+The `inert` attribute removes elements from tab order and accessibility tree. Use it to disable background content when a modal is open.
+</Callout>
+
+## Skip Links
+
+Skip links help keyboard users bypass repetitive content.
+
+```tsx
+function SkipLink() {
+  return (
+    <a
+      href="#main-content"
+      className="skip-link"
+    >
+      Skip to main content
+    </a>
+  );
+}
+
+function Layout({ children }: { children: React.ReactNode }) {
+  return (
+    <>
+      <SkipLink />
+      <header>
+        <nav>{/* Many nav items */}</nav>
+      </header>
+      <main id="main-content" tabIndex={-1}>
+        {children}
+      </main>
+    </>
+  );
+}
+```
+
+```css
+/* CSS for skip link */
+.skip-link {
+  position: absolute;
+  top: -40px;
+  left: 0;
+  padding: 8px;
+  background: #000;
+  color: #fff;
+  z-index: 100;
+}
+
+.skip-link:focus {
+  top: 0;
+}
+```
+
+<Callout type="warn">
+The skip link target (`main`) needs `tabIndex={-1}` to receive focus in some browsers.
+</Callout>
+
+## Focus Restoration
+
+Return focus to the triggering element after closing dialogs or completing actions.
+
+### Pattern for Disclosure
+
+```tsx
+import { useState, useRef } from 'react';
+
+function Disclosure() {
+  const [open, setOpen] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+
+  const handleClose = () => {
+    setOpen(false);
+    // Restore focus to trigger
+    buttonRef.current?.focus();
+  };
+
+  return (
+    <div>
+      <button
+        ref={buttonRef}
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+      >
+        Toggle Details
+      </button>
+
+      {open && (
+        <div>
+          <p>Expanded content here</p>
+          <button type="button" onClick={handleClose}>
+            Close
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+```
+
+### Focus After Deletion
+
+```tsx
+import { useState, useRef, useEffect } from 'react';
+
+interface Item {
+  id: string;
+  name: string;
+}
+
+function ItemList({ initialItems }: { initialItems: Item[] }) {
+  const [items, setItems] = useState(initialItems);
+  const [deletedIndex, setDeletedIndex] = useState<number | null>(null);
+  const itemRefs = useRef<Map<string, HTMLLIElement>>(new Map());
+  const listRef = useRef<HTMLUListElement>(null);
+
+  useEffect(() => {
+    if (deletedIndex === null) return;
+
+    // Focus next item, or previous, or list itself
+    const nextItem = items[deletedIndex] || items[deletedIndex - 1];
+
+    if (nextItem) {
+      itemRefs.current.get(nextItem.id)?.focus();
+    } else {
+      listRef.current?.focus();
+    }
+
+    setDeletedIndex(null);
+  }, [items, deletedIndex]);
+
+  const handleDelete = (id: string, index: number) => {
+    setDeletedIndex(index);
+    setItems(items.filter((item) => item.id !== id));
+  };
+
+  return (
+    <ul ref={listRef} tabIndex={-1}>
+      {items.map((item, index) => (
+        <li
+          key={item.id}
+          ref={(el) => {
+            if (el) itemRefs.current.set(item.id, el);
+          }}
+          tabIndex={-1}
+        >
+          {item.name}
+          <button
+            type="button"
+            onClick={() => handleDelete(item.id, index)}
+          >
+            Delete
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+```
+
+## Focus Indicators
+
+Never remove focus indicators without providing an alternative.
+
+### Good Practice
+
+```tsx
+// CSS - custom focus indicator
+function Button({ children }: { children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      className="custom-button"
+    >
+      {children}
+    </button>
+  );
+}
+```
+
+```css
+/* Custom focus styles */
+.custom-button:focus {
+  outline: none;
+}
+
+.custom-button:focus-visible {
+  outline: 2px solid #005fcc;
+  outline-offset: 2px;
+}
+```
+
+<Callout type="warn">
+Use `:focus-visible` instead of `:focus` to show focus indicators only for keyboard navigation, not mouse clicks.
+</Callout>
+
+### Focus Indicator Requirements
+
+| Requirement | Minimum |
+|-------------|---------|
+| Contrast ratio | 3:1 against adjacent colors |
+| Size | At least 2px thick |
+| Visibility | Must not be obscured |
+
+## Roving tabIndex Pattern
+
+For composite widgets (toolbars, menus, tabs), use roving tabIndex.
+
+### How It Works
+
+- Container has one focusable item (`tabIndex={0}`)
+- Other items have `tabIndex={-1}`
+- Arrow keys move focus between items
+- Tab exits the widget
+
+```tsx
+import { useState, useRef, useCallback } from 'react';
+
+function Toolbar() {
+  const [activeIndex, setActiveIndex] = useState(0);
+  const itemsRef = useRef<HTMLButtonElement[]>([]);
+
+  const items = ['Bold', 'Italic', 'Underline', 'Strike'];
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    let newIndex = activeIndex;
+
+    switch (e.key) {
+      case 'ArrowRight':
+        newIndex = (activeIndex + 1) % items.length;
+        break;
+      case 'ArrowLeft':
+        newIndex = (activeIndex - 1 + items.length) % items.length;
+        break;
+      case 'Home':
+        newIndex = 0;
+        break;
+      case 'End':
+        newIndex = items.length - 1;
+        break;
+      default:
+        return;
+    }
+
+    e.preventDefault();
+    setActiveIndex(newIndex);
+    itemsRef.current[newIndex]?.focus();
+  }, [activeIndex, items.length]);
+
+  return (
+    <div role="toolbar" aria-label="Text formatting" onKeyDown={handleKeyDown}>
+      {items.map((item, index) => (
+        <button
+          key={item}
+          type="button"
+          ref={(el) => {
+            if (el) itemsRef.current[index] = el;
+          }}
+          tabIndex={index === activeIndex ? 0 : -1}
+        >
+          {item}
+        </button>
+      ))}
+    </div>
+  );
+}
+```
+
+### Roving tabIndex for Grid
+
+```tsx
+import { useState, useRef, useCallback } from 'react';
+
+interface Position {
+  row: number;
+  col: number;
+}
+
+function Grid() {
+  const [active, setActive] = useState<Position>({ row: 0, col: 0 });
+  const cellRefs = useRef<HTMLButtonElement[][]>([]);
+
+  const rows = 3;
+  const cols = 3;
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    const { row, col } = active;
+    let newRow = row;
+    let newCol = col;
+
+    switch (e.key) {
+      case 'ArrowUp':
+        newRow = Math.max(0, row - 1);
+        break;
+      case 'ArrowDown':
+        newRow = Math.min(rows - 1, row + 1);
+        break;
+      case 'ArrowLeft':
+        newCol = Math.max(0, col - 1);
+        break;
+      case 'ArrowRight':
+        newCol = Math.min(cols - 1, col + 1);
+        break;
+      default:
+        return;
+    }
+
+    e.preventDefault();
+    setActive({ row: newRow, col: newCol });
+    cellRefs.current[newRow]?.[newCol]?.focus();
+  }, [active]);
+
+  return (
+    <div
+      role="grid"
+      aria-label="Selection grid"
+      onKeyDown={handleKeyDown}
+    >
+      {Array.from({ length: rows }).map((_, rowIndex) => (
+        <div key={rowIndex} role="row">
+          {Array.from({ length: cols }).map((_, colIndex) => {
+            const isActive = active.row === rowIndex && active.col === colIndex;
+
+            return (
+              <button
+                key={colIndex}
+                role="gridcell"
+                type="button"
+                ref={(el) => {
+                  if (!cellRefs.current[rowIndex]) {
+                    cellRefs.current[rowIndex] = [];
+                  }
+                  if (el) cellRefs.current[rowIndex][colIndex] = el;
+                }}
+                tabIndex={isActive ? 0 : -1}
+                onClick={() => setActive({ row: rowIndex, col: colIndex })}
+              >
+                {rowIndex},{colIndex}
+              </button>
+            );
+          })}
+        </div>
+      ))}
+    </div>
+  );
+}
+```
+
+## Quick Reference
+
+| Pattern | When to Use |
+|---------|-------------|
+| `tabIndex={0}` | Make non-interactive element focusable |
+| `tabIndex={-1}` | Programmatic focus target |
+| Focus trap | Modals, dialogs |
+| Skip link | Page has repetitive header/nav |
+| Focus restoration | After closing dialogs |
+| Roving tabIndex | Toolbars, menus, tabs, grids |

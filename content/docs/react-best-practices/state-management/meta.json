@@ -1,0 +1,4 @@
+{
+  "title": "State Management",
+  "pages": ["state-principles", "local-state", "lifting-state", "derived-state", "context-patterns", "context-vs-redux", "state-machines"]
+}

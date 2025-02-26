@@ -1,0 +1,612 @@
+---
+title: Loading & Error States
+description: Patterns for handling loading, error, and empty states in React applications
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## Overview
+
+Every data-fetching component needs to handle three states: loading, success, and error. Good UX requires thoughtful handling of each state.
+
+## Loading State Patterns
+
+### Basic Loading State
+
+```tsx
+import { useState, useEffect } from 'react';
+
+function UserProfile({ userId }: { userId: number }) {
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    fetch(`/api/users/${userId}`)
+      .then(res => res.json())
+      .then(data => {
+        setUser(data);
+        setLoading(false);
+      });
+  }, [userId]);
+
+  if (loading) {
+    return <div>Loading...</div>;
+  }
+
+  return <div>{user?.name}</div>;
+}
+```
+
+### Delayed Loading Indicator
+
+Avoid flash of loading state for fast requests.
+
+```tsx
+import { useState, useEffect, useRef } from 'react';
+
+function useDelayedLoading(isLoading: boolean, delay = 200): boolean {
+  const [showLoading, setShowLoading] = useState(false);
+  const timeoutRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (isLoading) {
+      timeoutRef.current = window.setTimeout(() => {
+        setShowLoading(true);
+      }, delay);
+    } else {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+      setShowLoading(false);
+    }
+
+    return () => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+    };
+  }, [isLoading, delay]);
+
+  return showLoading;
+}
+
+// Usage
+function DataList() {
+  const [loading, setLoading] = useState(true);
+  const showLoading = useDelayedLoading(loading, 300);
+
+  // Only show spinner after 300ms
+  if (showLoading) {
+    return <Spinner />;
+  }
+
+  return <div>{/* content */}</div>;
+}
+```
+
+<Callout type="info">
+Delayed loading indicators prevent UI flicker for fast responses. 200-300ms is a common threshold.
+</Callout>
+
+### Minimum Loading Duration
+
+Ensure loading indicator shows for at least a minimum time to prevent jarring transitions.
+
+```tsx
+import { useState, useEffect, useRef } from 'react';
+
+function useFetchWithMinDuration<T>(
+  url: string,
+  minDuration = 500
+): { data: T | null; loading: boolean } {
+  const [data, setData] = useState<T | null>(null);
+  const [loading, setLoading] = useState(true);
+  const startTimeRef = useRef<number>(0);
+
+  useEffect(() => {
+    startTimeRef.current = Date.now();
+    setLoading(true);
+
+    fetch(url)
+      .then(res => res.json())
+      .then(result => {
+        const elapsed = Date.now() - startTimeRef.current;
+        const remaining = Math.max(0, minDuration - elapsed);
+
+        setTimeout(() => {
+          setData(result);
+          setLoading(false);
+        }, remaining);
+      });
+  }, [url, minDuration]);
+
+  return { data, loading };
+}
+```
+
+## Error State Patterns
+
+### Basic Error Display
+
+```tsx
+import { useState, useEffect } from 'react';
+
+interface FetchState<T> {
+  data: T | null;
+  error: Error | null;
+  loading: boolean;
+}
+
+function UserList() {
+  const [state, setState] = useState<FetchState<User[]>>({
+    data: null,
+    error: null,
+    loading: true
+  });
+
+  useEffect(() => {
+    fetch('/api/users')
+      .then(res => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
+      .then(data => setState({ data, error: null, loading: false }))
+      .catch(error => setState({ data: null, error, loading: false }));
+  }, []);
+
+  if (state.loading) return <div>Loading...</div>;
+
+  if (state.error) {
+    return (
+      <div role="alert" className="error-container">
+        <h2>Something went wrong</h2>
+        <p>{state.error.message}</p>
+      </div>
+    );
+  }
+
+  return <ul>{state.data?.map(u => <li key={u.id}>{u.name}</li>)}</ul>;
+}
+```
+
+### Error with Status Codes
+
+```tsx
+interface ApiError {
+  status: number;
+  message: string;
+}
+
+function ErrorDisplay({ error }: { error: ApiError }) {
+  const errorContent = {
+    400: {
+      title: 'Bad Request',
+      message: 'Please check your input and try again.'
+    },
+    401: {
+      title: 'Unauthorized',
+      message: 'Please log in to continue.'
+    },
+    403: {
+      title: 'Forbidden',
+      message: 'You do not have permission to view this.'
+    },
+    404: {
+      title: 'Not Found',
+      message: 'The requested resource could not be found.'
+    },
+    500: {
+      title: 'Server Error',
+      message: 'Something went wrong on our end. Please try again later.'
+    }
+  };
+
+  const content = errorContent[error.status as keyof typeof errorContent] ?? {
+    title: 'Error',
+    message: error.message
+  };
+
+  return (
+    <div role="alert">
+      <h2>{content.title}</h2>
+      <p>{content.message}</p>
+    </div>
+  );
+}
+```
+
+## Empty State Handling
+
+### Basic Empty State
+
+```tsx
+interface User {
+  id: number;
+  name: string;
+}
+
+function UserList({ users }: { users: User[] }) {
+  if (users.length === 0) {
+    return (
+      <div className="empty-state">
+        <h3>No users found</h3>
+        <p>There are no users to display at this time.</p>
+      </div>
+    );
+  }
+
+  return (
+    <ul>
+      {users.map(user => (
+        <li key={user.id}>{user.name}</li>
+      ))}
+    </ul>
+  );
+}
+```
+
+### Empty State with Action
+
+```tsx
+interface EmptyStateProps {
+  title: string;
+  description: string;
+  action?: {
+    label: string;
+    onClick: () => void;
+  };
+}
+
+function EmptyState({ title, description, action }: EmptyStateProps) {
+  return (
+    <div className="empty-state">
+      <h3>{title}</h3>
+      <p>{description}</p>
+      {action && (
+        <button onClick={action.onClick}>{action.label}</button>
+      )}
+    </div>
+  );
+}
+
+// Usage
+function ProjectList({ projects }: { projects: Project[] }) {
+  if (projects.length === 0) {
+    return (
+      <EmptyState
+        title="No projects yet"
+        description="Create your first project to get started."
+        action={{
+          label: 'Create Project',
+          onClick: () => openCreateModal()
+        }}
+      />
+    );
+  }
+
+  return <div>{/* render projects */}</div>;
+}
+```
+
+### Empty State Types
+
+| Type | Use Case | Example |
+|------|----------|---------|
+| No data | First-time user, empty collection | "No messages yet" |
+| No results | Search/filter returned nothing | "No results for 'xyz'" |
+| Error recovery | After an error | "Unable to load. Try again?" |
+| Permission | No access | "You don't have access" |
+
+## Skeleton Loading
+
+### Basic Skeleton Component
+
+```tsx
+interface SkeletonProps {
+  width?: string | number;
+  height?: string | number;
+  borderRadius?: string;
+}
+
+function Skeleton({
+  width = '100%',
+  height = '1rem',
+  borderRadius = '4px'
+}: SkeletonProps) {
+  return (
+    <div
+      className="skeleton"
+      style={{
+        width,
+        height,
+        borderRadius,
+        backgroundColor: '#e0e0e0',
+        animation: 'pulse 1.5s ease-in-out infinite'
+      }}
+    />
+  );
+}
+
+// Add CSS
+const skeletonStyles = `
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+`;
+```
+
+### Skeleton Layout Matching Real Content
+
+```tsx
+function UserCardSkeleton() {
+  return (
+    <div className="user-card">
+      <Skeleton width={64} height={64} borderRadius="50%" />
+      <div className="user-info">
+        <Skeleton width="60%" height="1.25rem" />
+        <Skeleton width="40%" height="1rem" />
+      </div>
+    </div>
+  );
+}
+
+function UserCard({ user }: { user: User | null; loading: boolean }) {
+  if (!user) {
+    return <UserCardSkeleton />;
+  }
+
+  return (
+    <div className="user-card">
+      <img src={user.avatar} alt={user.name} />
+      <div className="user-info">
+        <h3>{user.name}</h3>
+        <p>{user.email}</p>
+      </div>
+    </div>
+  );
+}
+```
+
+### Skeleton List
+
+```tsx
+function UserListSkeleton({ count = 5 }: { count?: number }) {
+  return (
+    <div>
+      {Array.from({ length: count }).map((_, i) => (
+        <UserCardSkeleton key={i} />
+      ))}
+    </div>
+  );
+}
+
+function UserList() {
+  const [users, setUsers] = useState<User[] | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch('/api/users')
+      .then(res => res.json())
+      .then(data => {
+        setUsers(data);
+        setLoading(false);
+      });
+  }, []);
+
+  if (loading) {
+    return <UserListSkeleton count={5} />;
+  }
+
+  return (
+    <div>
+      {users?.map(user => <UserCard key={user.id} user={user} loading={false} />)}
+    </div>
+  );
+}
+```
+
+<Callout type="info">
+Skeletons should match the layout of real content to minimize layout shift when data loads.
+</Callout>
+
+## Retry Patterns
+
+### Simple Retry Button
+
+```tsx
+function DataWithRetry() {
+  const [data, setData] = useState<Data | null>(null);
+  const [error, setError] = useState<Error | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const fetchData = async () => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const res = await fetch('/api/data');
+      if (!res.ok) throw new Error('Failed to fetch');
+      setData(await res.json());
+    } catch (e) {
+      setError(e instanceof Error ? e : new Error('Unknown error'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchData();
+  }, []);
+
+  if (error) {
+    return (
+      <div>
+        <p>Failed to load data</p>
+        <button onClick={fetchData}>Try Again</button>
+      </div>
+    );
+  }
+
+  if (loading) return <div>Loading...</div>;
+
+  return <div>{/* render data */}</div>;
+}
+```
+
+### Automatic Retry with Exponential Backoff
+
+```tsx
+import { useState, useEffect, useRef } from 'react';
+
+interface UseRetryFetchOptions {
+  maxRetries?: number;
+  baseDelay?: number;
+  maxDelay?: number;
+}
+
+function useRetryFetch<T>(
+  url: string,
+  options: UseRetryFetchOptions = {}
+) {
+  const { maxRetries = 3, baseDelay = 1000, maxDelay = 10000 } = options;
+
+  const [data, setData] = useState<T | null>(null);
+  const [error, setError] = useState<Error | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [retryCount, setRetryCount] = useState(0);
+  const controllerRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    controllerRef.current = new AbortController();
+
+    const fetchWithRetry = async (attempt: number): Promise<void> => {
+      try {
+        const res = await fetch(url, {
+          signal: controllerRef.current?.signal
+        });
+
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+        const result = await res.json();
+        setData(result);
+        setError(null);
+        setLoading(false);
+      } catch (e) {
+        if (e instanceof Error && e.name === 'AbortError') return;
+
+        if (attempt < maxRetries) {
+          const delay = Math.min(baseDelay * Math.pow(2, attempt), maxDelay);
+          setRetryCount(attempt + 1);
+
+          await new Promise(resolve => setTimeout(resolve, delay));
+          return fetchWithRetry(attempt + 1);
+        }
+
+        setError(e instanceof Error ? e : new Error('Unknown error'));
+        setLoading(false);
+      }
+    };
+
+    fetchWithRetry(0);
+
+    return () => {
+      controllerRef.current?.abort();
+    };
+  }, [url, maxRetries, baseDelay, maxDelay]);
+
+  return { data, error, loading, retryCount };
+}
+```
+
+## State Machine Approach
+
+Manage loading/error/success states explicitly using a discriminated union.
+
+```tsx
+type FetchState<T> =
+  | { status: 'idle' }
+  | { status: 'loading' }
+  | { status: 'success'; data: T }
+  | { status: 'error'; error: Error };
+
+function useFetchMachine<T>(url: string) {
+  const [state, setState] = useState<FetchState<T>>({ status: 'idle' });
+
+  const fetch = async () => {
+    setState({ status: 'loading' });
+
+    try {
+      const res = await window.fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setState({ status: 'success', data });
+    } catch (e) {
+      setState({
+        status: 'error',
+        error: e instanceof Error ? e : new Error('Unknown')
+      });
+    }
+  };
+
+  return { state, fetch };
+}
+
+// Usage with exhaustive pattern matching
+function DataDisplay({ url }: { url: string }) {
+  const { state, fetch } = useFetchMachine<User[]>(url);
+
+  useEffect(() => {
+    fetch();
+  }, [url]);
+
+  switch (state.status) {
+    case 'idle':
+      return null;
+
+    case 'loading':
+      return <Spinner />;
+
+    case 'error':
+      return (
+        <div>
+          <p>Error: {state.error.message}</p>
+          <button onClick={fetch}>Retry</button>
+        </div>
+      );
+
+    case 'success':
+      return (
+        <ul>
+          {state.data.map(user => (
+            <li key={user.id}>{user.name}</li>
+          ))}
+        </ul>
+      );
+  }
+}
+```
+
+### Pros & Cons of State Machine
+
+| Pros | Cons |
+|------|------|
+| Impossible invalid states | More verbose |
+| Exhaustive type checking | Learning curve |
+| Clear state transitions | May be overkill for simple cases |
+| Self-documenting code | Slightly more boilerplate |
+
+<Callout type="warn">
+Avoid boolean combinations like `isLoading && hasError`. State machines prevent impossible states like "loading and error at the same time."
+</Callout>
+
+## When to Use Each Pattern
+
+| Pattern | Best For |
+|---------|----------|
+| Simple loading boolean | Quick prototypes, simple fetches |
+| Delayed loading indicator | Fast API responses, avoiding flicker |
+| Skeleton loading | Content-heavy pages, better perceived performance |
+| State machine | Complex flows, multiple states, type safety |
+| Automatic retry | Unreliable networks, critical data |

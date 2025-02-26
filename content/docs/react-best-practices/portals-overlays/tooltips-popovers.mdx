@@ -1,0 +1,1123 @@
+---
+title: Tooltips and Popovers
+description: Implement accessible tooltips and popovers with proper positioning, keyboard support, and ARIA attributes.
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## Tooltips vs Popovers
+
+| Feature | Tooltip | Popover |
+|---------|---------|---------|
+| Trigger | Hover/Focus | Click |
+| Content | Brief text only | Rich content, interactive |
+| Dismissal | Mouse leave/blur | Click outside or close button |
+| Purpose | Supplementary info | Additional actions or details |
+| Interaction | Non-interactive | Can contain buttons, links |
+
+## When to Use Tooltips
+
+| Use Case | Example |
+|----------|---------|
+| Icon button labels | "Delete", "Edit", "Share" |
+| Truncated text | Full text on hover |
+| Abbreviations | Expand acronyms |
+| Form field hints | Additional guidance |
+| Disabled state reasons | "Login required" |
+
+## When NOT to Use Tooltips
+
+| Situation | Alternative |
+|-----------|-------------|
+| Essential information | Inline text |
+| Mobile-primary interfaces | Inline hints |
+| Complex content | Popover or modal |
+| Error messages | Inline validation |
+| Interactive content | Popover |
+| Information needed immediately | Visible label |
+
+<Callout type="warn">
+Tooltips are not accessible on touch devices. Never put essential information in tooltips alone.
+</Callout>
+
+## Basic Tooltip
+
+```tsx
+import { useState, useRef, ReactNode } from 'react';
+import { createPortal } from 'react-dom';
+
+interface TooltipProps {
+  content: string;
+  children: ReactNode;
+}
+
+function Tooltip({ content, children }: TooltipProps) {
+  const [visible, setVisible] = useState(false);
+  const [position, setPosition] = useState({ top: 0, left: 0 });
+  const triggerRef = useRef<HTMLSpanElement>(null);
+  const tooltipId = useRef(`tooltip-${Math.random().toString(36).slice(2)}`);
+
+  const showTooltip = () => {
+    if (!triggerRef.current) return;
+
+    const rect = triggerRef.current.getBoundingClientRect();
+    setPosition({
+      top: rect.top - 8, // 8px gap above trigger
+      left: rect.left + rect.width / 2,
+    });
+    setVisible(true);
+  };
+
+  const hideTooltip = () => {
+    setVisible(false);
+  };
+
+  return (
+    <>
+      <span
+        ref={triggerRef}
+        onMouseEnter={showTooltip}
+        onMouseLeave={hideTooltip}
+        onFocus={showTooltip}
+        onBlur={hideTooltip}
+        aria-describedby={visible ? tooltipId.current : undefined}
+      >
+        {children}
+      </span>
+
+      {visible &&
+        createPortal(
+          <div
+            id={tooltipId.current}
+            role="tooltip"
+            className="tooltip"
+            style={{
+              position: 'fixed',
+              top: position.top,
+              left: position.left,
+              transform: 'translate(-50%, -100%)',
+            }}
+          >
+            {content}
+          </div>,
+          document.body
+        )}
+    </>
+  );
+}
+```
+
+### Usage
+
+```tsx
+<Tooltip content="Remove this item from your cart">
+  <button aria-label="Delete item">
+    <TrashIcon />
+  </button>
+</Tooltip>
+```
+
+## Tooltip with Delay
+
+Prevent tooltips from flickering during quick mouse movements.
+
+```tsx
+import { useState, useRef, useCallback, ReactNode } from 'react';
+import { createPortal } from 'react-dom';
+
+interface TooltipProps {
+  content: string;
+  children: ReactNode;
+  showDelay?: number;
+  hideDelay?: number;
+}
+
+function Tooltip({
+  content,
+  children,
+  showDelay = 300,
+  hideDelay = 100,
+}: TooltipProps) {
+  const [visible, setVisible] = useState(false);
+  const [position, setPosition] = useState({ top: 0, left: 0 });
+  const triggerRef = useRef<HTMLSpanElement>(null);
+  const showTimeoutRef = useRef<number>();
+  const hideTimeoutRef = useRef<number>();
+  const tooltipId = useRef(`tooltip-${Math.random().toString(36).slice(2)}`);
+
+  const showTooltip = useCallback(() => {
+    clearTimeout(hideTimeoutRef.current);
+
+    showTimeoutRef.current = window.setTimeout(() => {
+      if (!triggerRef.current) return;
+
+      const rect = triggerRef.current.getBoundingClientRect();
+      setPosition({
+        top: rect.top - 8,
+        left: rect.left + rect.width / 2,
+      });
+      setVisible(true);
+    }, showDelay);
+  }, [showDelay]);
+
+  const hideTooltip = useCallback(() => {
+    clearTimeout(showTimeoutRef.current);
+
+    hideTimeoutRef.current = window.setTimeout(() => {
+      setVisible(false);
+    }, hideDelay);
+  }, [hideDelay]);
+
+  return (
+    <>
+      <span
+        ref={triggerRef}
+        onMouseEnter={showTooltip}
+        onMouseLeave={hideTooltip}
+        onFocus={showTooltip}
+        onBlur={hideTooltip}
+        aria-describedby={visible ? tooltipId.current : undefined}
+      >
+        {children}
+      </span>
+
+      {visible &&
+        createPortal(
+          <div
+            id={tooltipId.current}
+            role="tooltip"
+            className="tooltip"
+            style={{
+              position: 'fixed',
+              top: position.top,
+              left: position.left,
+              transform: 'translate(-50%, -100%)',
+            }}
+          >
+            {content}
+          </div>,
+          document.body
+        )}
+    </>
+  );
+}
+```
+
+## Tooltip Positioning
+
+Handle edge cases where tooltip would overflow viewport.
+
+```tsx
+type Placement = 'top' | 'bottom' | 'left' | 'right';
+
+interface Position {
+  top: number;
+  left: number;
+  actualPlacement: Placement;
+}
+
+function calculatePosition(
+  triggerRect: DOMRect,
+  tooltipRect: DOMRect,
+  preferredPlacement: Placement,
+  offset: number = 8
+): Position {
+  const viewport = {
+    width: window.innerWidth,
+    height: window.innerHeight,
+  };
+
+  const positions: Record<Placement, { top: number; left: number }> = {
+    top: {
+      top: triggerRect.top - tooltipRect.height - offset,
+      left: triggerRect.left + triggerRect.width / 2 - tooltipRect.width / 2,
+    },
+    bottom: {
+      top: triggerRect.bottom + offset,
+      left: triggerRect.left + triggerRect.width / 2 - tooltipRect.width / 2,
+    },
+    left: {
+      top: triggerRect.top + triggerRect.height / 2 - tooltipRect.height / 2,
+      left: triggerRect.left - tooltipRect.width - offset,
+    },
+    right: {
+      top: triggerRect.top + triggerRect.height / 2 - tooltipRect.height / 2,
+      left: triggerRect.right + offset,
+    },
+  };
+
+  // Check if preferred placement fits
+  const preferred = positions[preferredPlacement];
+  const fitsPreferred = checkFits(preferred, tooltipRect, viewport);
+
+  if (fitsPreferred) {
+    return { ...preferred, actualPlacement: preferredPlacement };
+  }
+
+  // Try opposite placement
+  const opposites: Record<Placement, Placement> = {
+    top: 'bottom',
+    bottom: 'top',
+    left: 'right',
+    right: 'left',
+  };
+
+  const opposite = opposites[preferredPlacement];
+  const oppositePos = positions[opposite];
+
+  if (checkFits(oppositePos, tooltipRect, viewport)) {
+    return { ...oppositePos, actualPlacement: opposite };
+  }
+
+  // Fall back to preferred with clamping
+  return {
+    top: clamp(preferred.top, 0, viewport.height - tooltipRect.height),
+    left: clamp(preferred.left, 0, viewport.width - tooltipRect.width),
+    actualPlacement: preferredPlacement,
+  };
+}
+
+function checkFits(
+  pos: { top: number; left: number },
+  rect: DOMRect,
+  viewport: { width: number; height: number }
+): boolean {
+  return (
+    pos.top >= 0 &&
+    pos.left >= 0 &&
+    pos.top + rect.height <= viewport.height &&
+    pos.left + rect.width <= viewport.width
+  );
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+```
+
+### Tooltip with Auto-Positioning
+
+```tsx
+import { useState, useRef, useLayoutEffect, ReactNode } from 'react';
+import { createPortal } from 'react-dom';
+
+interface TooltipProps {
+  content: string;
+  children: ReactNode;
+  placement?: Placement;
+}
+
+function Tooltip({ content, children, placement = 'top' }: TooltipProps) {
+  const [visible, setVisible] = useState(false);
+  const [position, setPosition] = useState({ top: 0, left: 0 });
+  const [actualPlacement, setActualPlacement] = useState(placement);
+
+  const triggerRef = useRef<HTMLSpanElement>(null);
+  const tooltipRef = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    if (!visible || !triggerRef.current || !tooltipRef.current) return;
+
+    const triggerRect = triggerRef.current.getBoundingClientRect();
+    const tooltipRect = tooltipRef.current.getBoundingClientRect();
+
+    const pos = calculatePosition(triggerRect, tooltipRect, placement);
+    setPosition({ top: pos.top, left: pos.left });
+    setActualPlacement(pos.actualPlacement);
+  }, [visible, placement]);
+
+  return (
+    <>
+      <span
+        ref={triggerRef}
+        onMouseEnter={() => setVisible(true)}
+        onMouseLeave={() => setVisible(false)}
+        onFocus={() => setVisible(true)}
+        onBlur={() => setVisible(false)}
+      >
+        {children}
+      </span>
+
+      {visible &&
+        createPortal(
+          <div
+            ref={tooltipRef}
+            role="tooltip"
+            className={`tooltip tooltip-${actualPlacement}`}
+            style={{
+              position: 'fixed',
+              top: position.top,
+              left: position.left,
+            }}
+          >
+            {content}
+          </div>,
+          document.body
+        )}
+    </>
+  );
+}
+```
+
+## Basic Popover
+
+Popovers contain interactive content triggered by click.
+
+```tsx
+import { useState, useRef, useEffect, ReactNode } from 'react';
+import { createPortal } from 'react-dom';
+
+interface PopoverProps {
+  trigger: ReactNode;
+  children: ReactNode;
+  placement?: 'top' | 'bottom' | 'left' | 'right';
+}
+
+function Popover({ trigger, children, placement = 'bottom' }: PopoverProps) {
+  const [open, setOpen] = useState(false);
+  const [position, setPosition] = useState({ top: 0, left: 0 });
+
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
+  const popoverId = useRef(`popover-${Math.random().toString(36).slice(2)}`);
+
+  // Position popover
+  useEffect(() => {
+    if (!open || !triggerRef.current || !popoverRef.current) return;
+
+    const triggerRect = triggerRef.current.getBoundingClientRect();
+    const popoverRect = popoverRef.current.getBoundingClientRect();
+
+    const pos = calculatePosition(triggerRect, popoverRect, placement);
+    setPosition({ top: pos.top, left: pos.left });
+  }, [open, placement]);
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return;
+
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (
+        !triggerRef.current?.contains(target) &&
+        !popoverRef.current?.contains(target)
+      ) {
+        setOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [open]);
+
+  // Close on Escape
+  useEffect(() => {
+    if (!open) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [open]);
+
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        type="button"
+        onClick={() => setOpen(!open)}
+        aria-expanded={open}
+        aria-controls={open ? popoverId.current : undefined}
+      >
+        {trigger}
+      </button>
+
+      {open &&
+        createPortal(
+          <div
+            ref={popoverRef}
+            id={popoverId.current}
+            role="dialog"
+            aria-modal="false"
+            className="popover"
+            style={{
+              position: 'fixed',
+              top: position.top,
+              left: position.left,
+            }}
+          >
+            {children}
+          </div>,
+          document.body
+        )}
+    </>
+  );
+}
+```
+
+### Usage
+
+```tsx
+<Popover trigger="Settings">
+  <div className="popover-content">
+    <h3>Quick Settings</h3>
+    <label>
+      <input type="checkbox" /> Dark mode
+    </label>
+    <label>
+      <input type="checkbox" /> Notifications
+    </label>
+    <button>Save</button>
+  </div>
+</Popover>
+```
+
+## Popover with Focus Management
+
+```tsx
+import { useState, useRef, useEffect, useCallback, ReactNode } from 'react';
+import { createPortal } from 'react-dom';
+
+const FOCUSABLE_SELECTOR = [
+  'button:not([disabled])',
+  'input:not([disabled])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  'a[href]',
+  '[tabindex]:not([tabindex="-1"])',
+].join(', ');
+
+interface PopoverProps {
+  trigger: ReactNode;
+  children: ReactNode;
+  initialFocus?: 'first' | 'none';
+}
+
+function Popover({ trigger, children, initialFocus = 'first' }: PopoverProps) {
+  const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
+
+  // Focus first element when opened
+  useEffect(() => {
+    if (!open || initialFocus === 'none') return;
+
+    const firstFocusable = popoverRef.current?.querySelector<HTMLElement>(
+      FOCUSABLE_SELECTOR
+    );
+    firstFocusable?.focus();
+  }, [open, initialFocus]);
+
+  // Handle keyboard navigation
+  const handleKeyDown = useCallback((event: React.KeyboardEvent) => {
+    if (event.key === 'Escape') {
+      setOpen(false);
+      triggerRef.current?.focus();
+      return;
+    }
+
+    // Tab out of popover closes it
+    if (event.key === 'Tab') {
+      const focusableElements = popoverRef.current?.querySelectorAll<HTMLElement>(
+        FOCUSABLE_SELECTOR
+      );
+
+      if (!focusableElements?.length) return;
+
+      const lastElement = focusableElements[focusableElements.length - 1];
+      const firstElement = focusableElements[0];
+
+      // Tab from last element or Shift+Tab from first
+      if (
+        (!event.shiftKey && document.activeElement === lastElement) ||
+        (event.shiftKey && document.activeElement === firstElement)
+      ) {
+        event.preventDefault();
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
+    }
+  }, []);
+
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        type="button"
+        onClick={() => setOpen(!open)}
+        aria-expanded={open}
+      >
+        {trigger}
+      </button>
+
+      {open &&
+        createPortal(
+          <div
+            ref={popoverRef}
+            role="dialog"
+            className="popover"
+            onKeyDown={handleKeyDown}
+          >
+            {children}
+            <button
+              type="button"
+              onClick={() => {
+                setOpen(false);
+                triggerRef.current?.focus();
+              }}
+              className="popover-close"
+              aria-label="Close"
+            >
+              &times;
+            </button>
+          </div>,
+          document.body
+        )}
+    </>
+  );
+}
+```
+
+## Hover Card
+
+Combines tooltip (hover trigger) with popover (rich content).
+
+```tsx
+import { useState, useRef, useCallback, ReactNode } from 'react';
+import { createPortal } from 'react-dom';
+
+interface HoverCardProps {
+  trigger: ReactNode;
+  children: ReactNode;
+  openDelay?: number;
+  closeDelay?: number;
+}
+
+function HoverCard({
+  trigger,
+  children,
+  openDelay = 500,
+  closeDelay = 300,
+}: HoverCardProps) {
+  const [open, setOpen] = useState(false);
+  const [position, setPosition] = useState({ top: 0, left: 0 });
+
+  const triggerRef = useRef<HTMLSpanElement>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
+  const openTimeoutRef = useRef<number>();
+  const closeTimeoutRef = useRef<number>();
+
+  const handleOpen = useCallback(() => {
+    clearTimeout(closeTimeoutRef.current);
+    openTimeoutRef.current = window.setTimeout(() => {
+      if (!triggerRef.current) return;
+
+      const rect = triggerRef.current.getBoundingClientRect();
+      setPosition({
+        top: rect.bottom + 8,
+        left: rect.left,
+      });
+      setOpen(true);
+    }, openDelay);
+  }, [openDelay]);
+
+  const handleClose = useCallback(() => {
+    clearTimeout(openTimeoutRef.current);
+    closeTimeoutRef.current = window.setTimeout(() => {
+      setOpen(false);
+    }, closeDelay);
+  }, [closeDelay]);
+
+  const cancelClose = useCallback(() => {
+    clearTimeout(closeTimeoutRef.current);
+  }, []);
+
+  return (
+    <>
+      <span
+        ref={triggerRef}
+        onMouseEnter={handleOpen}
+        onMouseLeave={handleClose}
+        onFocus={handleOpen}
+        onBlur={handleClose}
+      >
+        {trigger}
+      </span>
+
+      {open &&
+        createPortal(
+          <div
+            ref={cardRef}
+            className="hover-card"
+            onMouseEnter={cancelClose}
+            onMouseLeave={handleClose}
+            style={{
+              position: 'fixed',
+              top: position.top,
+              left: position.left,
+            }}
+          >
+            {children}
+          </div>,
+          document.body
+        )}
+    </>
+  );
+}
+```
+
+### Usage
+
+```tsx
+<HoverCard
+  trigger={<a href="/users/jane">@jane</a>}
+>
+  <div className="user-card">
+    <img src="/avatars/jane.jpg" alt="" />
+    <div>
+      <strong>Jane Doe</strong>
+      <p>Senior Developer</p>
+      <p>42 followers</p>
+    </div>
+  </div>
+</HoverCard>
+```
+
+## Dropdown Menu
+
+Common popover variant for navigation or actions.
+
+```tsx
+import { useState, useRef, useEffect, useCallback, KeyboardEvent } from 'react';
+import { createPortal } from 'react-dom';
+
+interface MenuItem {
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+}
+
+interface DropdownMenuProps {
+  trigger: ReactNode;
+  items: MenuItem[];
+}
+
+function DropdownMenu({ trigger, items }: DropdownMenuProps) {
+  const [open, setOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(-1);
+  const [position, setPosition] = useState({ top: 0, left: 0 });
+
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
+
+  // Position menu
+  useEffect(() => {
+    if (!open || !triggerRef.current) return;
+
+    const rect = triggerRef.current.getBoundingClientRect();
+    setPosition({
+      top: rect.bottom + 4,
+      left: rect.left,
+    });
+  }, [open]);
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return;
+
+    const handleClick = (e: MouseEvent) => {
+      if (
+        !triggerRef.current?.contains(e.target as Node) &&
+        !menuRef.current?.contains(e.target as Node)
+      ) {
+        setOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [open]);
+
+  const handleTriggerKeyDown = (e: KeyboardEvent) => {
+    switch (e.key) {
+      case 'Enter':
+      case ' ':
+      case 'ArrowDown':
+        e.preventDefault();
+        setOpen(true);
+        setActiveIndex(0);
+        break;
+      case 'ArrowUp':
+        e.preventDefault();
+        setOpen(true);
+        setActiveIndex(items.length - 1);
+        break;
+    }
+  };
+
+  const handleMenuKeyDown = useCallback(
+    (e: KeyboardEvent) => {
+      switch (e.key) {
+        case 'Escape':
+          setOpen(false);
+          triggerRef.current?.focus();
+          break;
+        case 'ArrowDown':
+          e.preventDefault();
+          setActiveIndex((prev) => {
+            const next = prev + 1;
+            return next >= items.length ? 0 : next;
+          });
+          break;
+        case 'ArrowUp':
+          e.preventDefault();
+          setActiveIndex((prev) => {
+            const next = prev - 1;
+            return next < 0 ? items.length - 1 : next;
+          });
+          break;
+        case 'Home':
+          e.preventDefault();
+          setActiveIndex(0);
+          break;
+        case 'End':
+          e.preventDefault();
+          setActiveIndex(items.length - 1);
+          break;
+        case 'Tab':
+          setOpen(false);
+          break;
+      }
+    },
+    [items.length]
+  );
+
+  // Focus active item
+  useEffect(() => {
+    if (open && activeIndex >= 0) {
+      itemRefs.current[activeIndex]?.focus();
+    }
+  }, [open, activeIndex]);
+
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        type="button"
+        onClick={() => setOpen(!open)}
+        onKeyDown={handleTriggerKeyDown}
+        aria-expanded={open}
+        aria-haspopup="menu"
+      >
+        {trigger}
+      </button>
+
+      {open &&
+        createPortal(
+          <div
+            ref={menuRef}
+            role="menu"
+            className="dropdown-menu"
+            onKeyDown={handleMenuKeyDown}
+            style={{
+              position: 'fixed',
+              top: position.top,
+              left: position.left,
+            }}
+          >
+            {items.map((item, index) => (
+              <button
+                key={item.label}
+                ref={(el) => {
+                  itemRefs.current[index] = el;
+                }}
+                role="menuitem"
+                type="button"
+                disabled={item.disabled}
+                tabIndex={index === activeIndex ? 0 : -1}
+                onClick={() => {
+                  item.onClick();
+                  setOpen(false);
+                  triggerRef.current?.focus();
+                }}
+                className={index === activeIndex ? 'active' : ''}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>,
+          document.body
+        )}
+    </>
+  );
+}
+```
+
+## Reusable Positioning Hook
+
+```tsx
+import { useState, useCallback, useRef, useLayoutEffect } from 'react';
+
+type Placement = 'top' | 'bottom' | 'left' | 'right';
+
+interface UseFloatingOptions {
+  placement?: Placement;
+  offset?: number;
+}
+
+interface FloatingPosition {
+  top: number;
+  left: number;
+  placement: Placement;
+}
+
+function useFloating<T extends HTMLElement, F extends HTMLElement>(
+  options: UseFloatingOptions = {}
+) {
+  const { placement = 'bottom', offset = 8 } = options;
+
+  const [position, setPosition] = useState<FloatingPosition | null>(null);
+  const referenceRef = useRef<T>(null);
+  const floatingRef = useRef<F>(null);
+
+  const update = useCallback(() => {
+    if (!referenceRef.current || !floatingRef.current) return;
+
+    const refRect = referenceRef.current.getBoundingClientRect();
+    const floatRect = floatingRef.current.getBoundingClientRect();
+
+    const pos = calculatePosition(refRect, floatRect, placement, offset);
+    setPosition({
+      top: pos.top,
+      left: pos.left,
+      placement: pos.actualPlacement,
+    });
+  }, [placement, offset]);
+
+  useLayoutEffect(() => {
+    update();
+  }, [update]);
+
+  // Update on scroll/resize
+  useLayoutEffect(() => {
+    window.addEventListener('scroll', update, true);
+    window.addEventListener('resize', update);
+
+    return () => {
+      window.removeEventListener('scroll', update, true);
+      window.removeEventListener('resize', update);
+    };
+  }, [update]);
+
+  return {
+    referenceRef,
+    floatingRef,
+    position,
+    update,
+  };
+}
+```
+
+### Usage
+
+```tsx
+function TooltipWithHook({ content, children }: TooltipProps) {
+  const [visible, setVisible] = useState(false);
+  const { referenceRef, floatingRef, position } = useFloating<
+    HTMLSpanElement,
+    HTMLDivElement
+  >({ placement: 'top' });
+
+  return (
+    <>
+      <span
+        ref={referenceRef}
+        onMouseEnter={() => setVisible(true)}
+        onMouseLeave={() => setVisible(false)}
+      >
+        {children}
+      </span>
+
+      {visible && position && createPortal(
+        <div
+          ref={floatingRef}
+          role="tooltip"
+          style={{
+            position: 'fixed',
+            top: position.top,
+            left: position.left,
+          }}
+        >
+          {content}
+        </div>,
+        document.body
+      )}
+    </>
+  );
+}
+```
+
+## Pros and Cons
+
+### Tooltips
+
+| Pros | Cons |
+|------|------|
+| Saves space | Not accessible on touch |
+| Provides context | Can obscure content |
+| Familiar pattern | Requires precise hover |
+| Enhances discoverability | Delayed information access |
+
+### Popovers
+
+| Pros | Cons |
+|------|------|
+| Rich interactive content | More complex implementation |
+| Stays visible until dismissed | Can obscure important content |
+| Accessible via click | Requires explicit close action |
+| Works on touch devices | Z-index management needed |
+
+## Accessibility Considerations
+
+### Tooltips
+
+1. **Use `aria-describedby`**: Connect trigger to tooltip.
+2. **Focus support**: Show on focus, not just hover.
+3. **Persistent**: Give users time to read (don't disappear immediately).
+4. **Not interactive**: Tooltips should not contain focusable elements.
+
+```tsx
+<button aria-describedby={tooltipVisible ? 'tooltip-1' : undefined}>
+  Delete
+</button>
+{tooltipVisible && (
+  <div id="tooltip-1" role="tooltip">
+    Remove this item permanently
+  </div>
+)}
+```
+
+### Popovers
+
+1. **Use `aria-expanded`**: On trigger button.
+2. **Use `aria-controls`**: Point to popover ID.
+3. **Focus management**: Focus first element or maintain trigger focus.
+4. **Escape to close**: Always support keyboard dismissal.
+
+```tsx
+<button
+  aria-expanded={open}
+  aria-controls={open ? 'popover-1' : undefined}
+  aria-haspopup="dialog"
+>
+  Options
+</button>
+{open && (
+  <div id="popover-1" role="dialog">
+    {/* Interactive content */}
+  </div>
+)}
+```
+
+<Callout type="info">
+For dropdown menus, use `role="menu"` and `role="menuitem"` instead of `role="dialog"`. Support arrow key navigation between items.
+</Callout>
+
+## CSS for Tooltips and Popovers
+
+```css
+/* Tooltip base styles */
+.tooltip {
+  background: #1a1a1a;
+  color: white;
+  padding: 6px 12px;
+  border-radius: 4px;
+  font-size: 14px;
+  max-width: 250px;
+  z-index: 1000;
+  pointer-events: none;
+}
+
+/* Arrow */
+.tooltip::after {
+  content: '';
+  position: absolute;
+  border: 6px solid transparent;
+}
+
+.tooltip-top::after {
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border-top-color: #1a1a1a;
+}
+
+.tooltip-bottom::after {
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border-bottom-color: #1a1a1a;
+}
+
+/* Popover styles */
+.popover {
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  padding: 16px;
+  min-width: 200px;
+  z-index: 1000;
+}
+
+/* Dropdown menu */
+.dropdown-menu {
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  padding: 4px;
+  min-width: 160px;
+}
+
+.dropdown-menu button {
+  display: block;
+  width: 100%;
+  padding: 8px 12px;
+  text-align: left;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.dropdown-menu button:hover,
+.dropdown-menu button.active {
+  background: #f5f5f5;
+}
+
+.dropdown-menu button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+```
+
+## Quick Reference
+
+| Component | Trigger | Content | ARIA |
+|-----------|---------|---------|------|
+| Tooltip | Hover/Focus | Text only | `role="tooltip"`, `aria-describedby` |
+| Popover | Click | Interactive | `role="dialog"`, `aria-expanded` |
+| Dropdown | Click | Menu items | `role="menu"`, `aria-haspopup` |
+| Hover card | Hover | Rich preview | `aria-describedby` |
+
+| Keyboard | Tooltip | Popover | Dropdown |
+|----------|---------|---------|----------|
+| Escape | Hide | Close | Close |
+| Tab | Hide | Navigate/Close | Close |
+| Arrow keys | N/A | N/A | Navigate items |
+| Enter/Space | N/A | Activate | Select item |

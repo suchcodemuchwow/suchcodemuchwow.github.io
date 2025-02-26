@@ -1,0 +1,251 @@
+---
+title: Concurrency
+description: Multi-threading and concurrent programming in Java
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## Thread Basics
+
+### Creating Threads
+
+```java
+// Using Runnable (preferred)
+Runnable task = () -> System.out.println("Running in: " + Thread.currentThread().getName());
+Thread thread = new Thread(task);
+thread.start();
+
+// Using Thread subclass (less common)
+class MyThread extends Thread {
+    @Override
+    public void run() {
+        System.out.println("Running");
+    }
+}
+```
+
+<Callout type="info" title="JS/TS delta">
+JavaScript is single-threaded with an event loop. Java has true multi-threading with shared memory. This introduces synchronization concerns that don't exist in JS.
+</Callout>
+
+<Callout type="info" title="Go delta">
+Java threads are heavier than goroutines. Java's Virtual Threads (Project Loom) are closer to goroutines in weight and programming model.
+</Callout>
+
+---
+
+## ExecutorService (Preferred)
+
+Don't create threads manually. Use executors:
+
+```java
+ExecutorService executor = Executors.newFixedThreadPool(4);
+
+// Submit tasks
+Future<String> future = executor.submit(() -> {
+    Thread.sleep(1000);
+    return "Result";
+});
+
+// Get result (blocks)
+String result = future.get();
+
+// Always shutdown
+executor.shutdown();
+```
+
+### Common Executor Types
+
+| Type | Use Case |
+|------|----------|
+| `newFixedThreadPool(n)` | Known workload, bounded threads |
+| `newCachedThreadPool()` | Many short-lived tasks |
+| `newSingleThreadExecutor()` | Sequential task execution |
+| `newVirtualThreadPerTaskExecutor()` | High concurrency I/O (Java 21+) |
+
+---
+
+## Virtual Threads (Java 21+)
+
+Lightweight threads for high-concurrency I/O:
+
+```java
+// Create virtual threads directly
+Thread.startVirtualThread(() -> {
+    // I/O-bound work
+});
+
+// With executor (preferred)
+try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+    IntStream.range(0, 10_000).forEach(i -> {
+        executor.submit(() -> {
+            Thread.sleep(Duration.ofSeconds(1));
+            return i;
+        });
+    });
+}  // executor.close() waits for all tasks
+```
+
+<Callout type="info" title="Go delta">
+Virtual threads are Java's answer to goroutines. They're cheap to create (millions possible) and automatically yield during blocking I/O.
+</Callout>
+
+---
+
+## Synchronization
+
+### synchronized Keyword
+
+```java
+public class Counter {
+    private int count = 0;
+
+    public synchronized void increment() {
+        count++;  // atomic with respect to other synchronized methods
+    }
+
+    public synchronized int getCount() {
+        return count;
+    }
+}
+```
+
+### synchronized Blocks
+
+```java
+public class Account {
+    private final Object lock = new Object();
+    private double balance;
+
+    public void transfer(Account to, double amount) {
+        synchronized (lock) {
+            if (balance >= amount) {
+                balance -= amount;
+                to.deposit(amount);
+            }
+        }
+    }
+}
+```
+
+---
+
+## Atomic Classes
+
+Lock-free thread-safe operations:
+
+```java
+import java.util.concurrent.atomic.*;
+
+AtomicInteger counter = new AtomicInteger(0);
+counter.incrementAndGet();  // thread-safe increment
+counter.compareAndSet(5, 10);  // CAS operation
+
+AtomicReference<User> userRef = new AtomicReference<>();
+userRef.set(new User("Alice"));
+User user = userRef.get();
+```
+
+---
+
+## Concurrent Collections
+
+| Class | Use Case |
+|-------|----------|
+| `ConcurrentHashMap` | Thread-safe map |
+| `CopyOnWriteArrayList` | Read-heavy, rare writes |
+| `BlockingQueue` | Producer-consumer |
+| `ConcurrentLinkedQueue` | Non-blocking queue |
+
+```java
+ConcurrentHashMap<String, User> cache = new ConcurrentHashMap<>();
+
+// Atomic operations
+cache.putIfAbsent("key", user);
+cache.computeIfAbsent("key", k -> loadUser(k));
+cache.merge("key", newUser, (old, new_) -> merge(old, new_));
+```
+
+---
+
+## CompletableFuture
+
+Composable async operations:
+
+```java
+CompletableFuture<User> userFuture = CompletableFuture
+    .supplyAsync(() -> userService.findById("123"))
+    .thenApply(user -> enrichUser(user))
+    .exceptionally(ex -> {
+        log.error("Failed to load user", ex);
+        return User.anonymous();
+    });
+
+// Combine multiple futures
+CompletableFuture<Void> allDone = CompletableFuture.allOf(
+    loadUsers(),
+    loadProducts(),
+    loadOrders()
+);
+
+// Any of
+CompletableFuture<Object> fastest = CompletableFuture.anyOf(
+    fetchFromCache(),
+    fetchFromDatabase()
+);
+```
+
+<Callout type="info" title="JS/TS delta">
+`CompletableFuture` is similar to `Promise`. Methods like `thenApply` ≈ `then`, `exceptionally` ≈ `catch`, `allOf` ≈ `Promise.all`.
+</Callout>
+
+---
+
+## Common Pitfalls
+
+### Race Conditions
+
+```java
+// WRONG: check-then-act is not atomic
+if (!map.containsKey(key)) {
+    map.put(key, value);  // another thread might put between check and put
+}
+
+// RIGHT: use atomic operation
+map.putIfAbsent(key, value);
+```
+
+### Deadlocks
+
+```java
+// WRONG: lock ordering can cause deadlock
+void transfer(Account a, Account b, double amount) {
+    synchronized (a) {
+        synchronized (b) {
+            // Thread 1: locks a, waits for b
+            // Thread 2: locks b, waits for a → deadlock
+        }
+    }
+}
+
+// RIGHT: consistent lock ordering
+void transfer(Account a, Account b, double amount) {
+    Account first = a.id < b.id ? a : b;
+    Account second = a.id < b.id ? b : a;
+    synchronized (first) {
+        synchronized (second) {
+            // always lock in same order
+        }
+    }
+}
+```
+
+### Memory Visibility
+
+```java
+// WRONG: changes might not be visible to other threads
+private boolean running = true;
+
+// RIGHT: volatile ensures visibility
+private volatile boolean running = true;
+```

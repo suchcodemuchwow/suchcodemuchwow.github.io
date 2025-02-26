@@ -1,0 +1,151 @@
+---
+title: Introduction
+description: A guide for programmers transitioning to Java
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## Scope and Conventions
+
+This guide is **concise**, **modular**, and **skimmable**. It follows a topic-based approach with minimalistic writing principles: self-contained topics, direct language, and "less is more".
+
+> **Authoring principles:** Write self-contained topics, use direct declarative language, minimize fluff, avoid generic headings like "Introduction"/"Conclusion", and limit heading depth.
+
+---
+
+## Audience and Prerequisites
+
+### Target Audience
+
+- Senior engineers with production experience in **JavaScript/TypeScript** and/or **Go**
+- Comfortable with: data structures, HTTP/JSON, testing, debugging, CI/CD, basic concurrency concepts, and reading unfamiliar codebases
+
+### Primary Goal
+
+Enable readers to **read**, **reason about**, and **modify** real Java codebases quickly (services and libraries).
+
+### Assumed Knowledge (Not Re-taught)
+
+| Category | Topics |
+|----------|--------|
+| Fundamentals | Control flow, loops, functions, standard collections usage, basic OOP vocabulary |
+| Concepts | Immutability, dependency injection (conceptually), logging/metrics at a high level |
+
+### Tooling Prerequisites
+
+| Tool | Requirement |
+|------|-------------|
+| **JDK** | Java 21 (LTS) by default. Java 17 works for most examples; sections requiring 21+ include alternatives. |
+| **IDE** | IntelliJ IDEA recommended, or equivalent editor support |
+| **Build** | Ability to run `javac`/`java` and a build tool (Maven or Gradle) |
+
+### What "Senior-Level" Means Here
+
+- We prioritize **semantics**, **tradeoffs**, and **pitfalls** over syntax walkthroughs
+- We use short examples and focus on reading patterns found in production
+
+---
+
+## What Is Out of Scope
+
+### Explicitly Out of Scope
+
+- **Beginner programming material:** loops, conditionals, "what is a variable," basic algorithm tutorials
+- **Full framework trainings:** e.g., complete Spring Boot course (we may reference frameworks but won't reproduce their documentation)
+- **Deep JVM internals** in early chapters (Runtime/JIT/GC covered later, only as needed for practical decisions)
+- **Organization-specific onboarding:** VPN, internal tooling, access requests (unless you add an internal appendix)
+
+### Not a Replacement For
+
+- Official Java SE API docs
+- Framework references
+- Team-specific runbooks
+
+### Non-Goals
+
+> This is **not** "all of Java." It's a curated, delta-focused path for experienced engineers.
+
+---
+
+## Code Conventions
+
+### Formatting and Style
+
+- Examples follow a consistent Java style aligned with widely adopted conventions
+- Where an organization has a Java style guide, prefer it for real projects
+
+### Example Design Rules
+
+| Rule | Description |
+|------|-------------|
+| Minimal but realistic | Demonstrate one primary concept and one or two common adjacent concepts |
+| Immutable by default | Use `record` for DTO-like data when appropriate |
+| Final fields | Use `final` fields for classes that model state |
+| Explicit types | Prefer explicit types when it improves readability; use `var` only when the inferred type is obvious |
+| Small methods | Prefer small methods with descriptive names over large blocks |
+
+### Error Handling
+
+- **Internal logic:** May throw exceptions for invalid state
+- **Public boundaries:** Convert to explicit error results or standardized exceptions
+
+### Null Policy
+
+- **Avoid** returning `null` from public APIs
+- Use `Optional<T>` for "may be absent" return values when it improves clarity
+
+### Imports and Packages
+
+- Use **explicit imports**; avoid wildcard imports
+- Use simple package names in snippets (e.g., `example.*`) unless demonstrating packaging rules
+
+### Testing Snippets
+
+Tests use standard JUnit-style structure:
+
+```
+Arrange → Act → Assert
+```
+
+---
+
+## Comparison Notation (JS/TS and Go Deltas)
+
+Comparisons appear **only** when there is a meaningful semantic difference or a common migration pitfall.
+
+### Callout Labels
+
+| Label | Purpose |
+|-------|---------|
+| **JS/TS delta** | Key difference or pitfall for JavaScript/TypeScript engineers |
+| **Go delta** | Key difference or pitfall for Go engineers |
+| **Migration note** | Practical advice when porting patterns between ecosystems |
+
+### Example Callouts
+
+<Callout type="info" title="JS/TS delta">
+Java types are **nominal** (by-name) rather than **structural** (by-shape). This affects API design and refactoring.
+</Callout>
+
+<Callout type="info" title="Go delta">
+Java uses exceptions and/or result types; idiomatic code often treats exceptions as boundary signals rather than return values.
+</Callout>
+
+### When Comparisons Appear
+
+- Equality and identity (`==` vs `.equals()` vs referential equality)
+- Nullability (`null` vs `undefined`, `Optional<T>`, and common failure modes)
+- Generics (variance, type erasure vs TS generics)
+- Concurrency model and blocking behavior
+- Dependency management concepts (BOMs vs lockfiles/semver ranges)
+
+### When Comparisons Do Not Appear
+
+- Pure syntax differences with no semantic or practical impact
+
+---
+
+## References
+
+- **Documentation principles:** Topic-based, minimalistic documentation style guidance (voice, minimalism, topic-based approach, avoiding generic headings)
+- **Code style:** Java code style alignment follows internal baselines when available (e.g., Google-style-derived Java code style guide)

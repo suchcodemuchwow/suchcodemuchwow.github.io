@@ -1,0 +1,496 @@
+---
+title: Memoization
+description: React.memo, useMemo, and useCallback patterns and pitfalls
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## React.memo Deep Dive
+
+`memo` prevents re-renders when props are shallowly equal:
+
+```tsx
+const ExpensiveList = memo(function ExpensiveList({ items }: Props) {
+  return (
+    <ul>
+      {items.map(item => (
+        <li key={item.id}>{item.name}</li>
+      ))}
+    </ul>
+  );
+});
+```
+
+### How It Works
+
+1. Parent re-renders
+2. React compares prev props with next props (shallow)
+3. If equal, skip re-render and reuse previous result
+4. If different, re-render the component
+
+### Shallow Comparison
+
+```tsx
+// Primitives: compared by value
+memo(Component); // Compares: name === name, count === count
+
+// Objects/Arrays: compared by reference
+const prev = { name: 'Alice' };
+const next = { name: 'Alice' };
+prev === next; // false - different references!
+```
+
+---
+
+## Custom Comparison Functions
+
+Override the default shallow comparison:
+
+```tsx
+interface UserCardProps {
+  user: {
+    id: string;
+    name: string;
+    avatar: string;
+    lastSeen: Date; // Changes frequently
+  };
+}
+
+const UserCard = memo(
+  function UserCard({ user }: UserCardProps) {
+    return (
+      <div>
+        <img src={user.avatar} alt={user.name} />
+        <span>{user.name}</span>
+      </div>
+    );
+  },
+  (prevProps, nextProps) => {
+    // Only re-render if display-relevant fields change
+    return (
+      prevProps.user.id === nextProps.user.id &&
+      prevProps.user.name === nextProps.user.name &&
+      prevProps.user.avatar === nextProps.user.avatar
+    );
+  }
+);
+```
+
+### Comparison Function Signature
+
+```tsx
+function arePropsEqual(prevProps: Props, nextProps: Props): boolean {
+  // Return true to SKIP re-render
+  // Return false to re-render
+}
+```
+
+<Callout type="warn" title="Return Value Meaning">
+`true` means props are equal (skip render). This is opposite of `shouldComponentUpdate` which returned true to update.
+</Callout>
+
+### When to Use Custom Comparison
+
+| Use Case | Example |
+|----------|---------|
+| Ignore irrelevant prop changes | Skip timestamp updates |
+| Deep compare specific props | Compare nested objects |
+| Optimize frequent updates | Animation frames |
+
+### When NOT to Use
+
+```tsx
+// Don't recreate the entire comparison logic
+const Component = memo(MyComponent, (prev, next) => {
+  return (
+    prev.a === next.a &&
+    prev.b === next.b &&
+    prev.c === next.c &&
+    // ... listing all props defeats the purpose
+  );
+});
+```
+
+---
+
+## useMemo Patterns
+
+Memoize expensive calculations:
+
+```tsx
+function ProductList({ products, filters }: Props) {
+  const filteredProducts = useMemo(() => {
+    return products
+      .filter(p => matchesFilters(p, filters))
+      .sort((a, b) => a.price - b.price);
+  }, [products, filters]);
+
+  return <List items={filteredProducts} />;
+}
+```
+
+### Valid Use Cases
+
+```tsx
+// 1. Expensive calculations
+const sortedData = useMemo(
+  () => data.sort((a, b) => complexSort(a, b)),
+  [data]
+);
+
+// 2. Referential equality for memo children
+const chartConfig = useMemo(
+  () => ({ width: 500, height: 300, data: processedData }),
+  [processedData]
+);
+return <MemoizedChart config={chartConfig} />;
+
+// 3. Avoiding recreating objects in effects
+const options = useMemo(
+  () => ({ threshold: 0.5, rootMargin: '10px' }),
+  []
+);
+useEffect(() => {
+  const observer = new IntersectionObserver(callback, options);
+  // ...
+}, [options]);
+```
+
+### Invalid Use Cases
+
+```tsx
+// Don't memoize cheap operations
+const fullName = useMemo(
+  () => `${firstName} ${lastName}`,
+  [firstName, lastName]
+); // String concat is trivial
+
+// Don't memoize when no consumers care about reference
+function Component({ items }: Props) {
+  const doubled = useMemo(
+    () => items.map(x => x * 2),
+    [items]
+  );
+  // If this isn't passed to memo'd children, useMemo adds overhead
+  return <div>{doubled.join(', ')}</div>;
+}
+```
+
+---
+
+## useCallback Patterns
+
+Memoize functions to maintain referential equality:
+
+```tsx
+function SearchForm({ onSearch }: Props) {
+  const [query, setQuery] = useState('');
+
+  const handleSubmit = useCallback(
+    (e: FormEvent) => {
+      e.preventDefault();
+      onSearch(query);
+    },
+    [query, onSearch]
+  );
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <input value={query} onChange={e => setQuery(e.target.value)} />
+      <MemoizedButton type="submit">Search</MemoizedButton>
+    </form>
+  );
+}
+```
+
+### useCallback + memo Pattern
+
+```tsx
+// Parent
+function ItemList({ items }: Props) {
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  const handleSelect = useCallback((id: string) => {
+    setSelectedId(id);
+  }, []);
+
+  return (
+    <ul>
+      {items.map(item => (
+        <MemoizedItem
+          key={item.id}
+          item={item}
+          isSelected={item.id === selectedId}
+          onSelect={handleSelect}
+        />
+      ))}
+    </ul>
+  );
+}
+
+// Child
+interface ItemProps {
+  item: Item;
+  isSelected: boolean;
+  onSelect: (id: string) => void;
+}
+
+const MemoizedItem = memo(function Item({ item, isSelected, onSelect }: ItemProps) {
+  return (
+    <li
+      onClick={() => onSelect(item.id)}
+      className={isSelected ? 'selected' : ''}
+    >
+      {item.name}
+    </li>
+  );
+});
+```
+
+### useCallback Without memo
+
+```tsx
+// Pointless: no memoized consumer
+function Form() {
+  const handleChange = useCallback((value: string) => {
+    console.log(value);
+  }, []);
+
+  return <input onChange={e => handleChange(e.target.value)} />;
+}
+```
+
+The input is not memoized, so `useCallback` provides no benefit.
+
+---
+
+## When Memoization Hurts
+
+### 1. Comparison Cost Exceeds Render Cost
+
+```tsx
+// Bad: Simple component with complex props
+const SimpleLabel = memo(function SimpleLabel({ config }: Props) {
+  return <span>{config.label}</span>;
+});
+
+// The shallow comparison of `config` object happens every render
+// but rendering a <span> is nearly free
+```
+
+### 2. Props Always Change
+
+```tsx
+// Pointless: new object every render
+function Parent() {
+  return (
+    <MemoizedChild
+      style={{ color: 'red' }} // New object!
+      onClick={() => {}}       // New function!
+    />
+  );
+}
+```
+
+memo compares, finds different references, re-renders anyway.
+
+### 3. Over-memoization
+
+```tsx
+// Don't do this
+function Component({ data }: Props) {
+  const a = useMemo(() => data.a, [data.a]);
+  const b = useMemo(() => data.b, [data.b]);
+  const c = useMemo(() => data.c, [data.c]);
+
+  // Trivial property access doesn't need memoization
+  return <div>{a} {b} {c}</div>;
+}
+```
+
+### 4. Memory Pressure
+
+```tsx
+// Memoizing large data structures keeps them in memory
+const processedData = useMemo(
+  () => hugeDataset.map(transform),
+  [hugeDataset]
+);
+// Previous result stays in memory until deps change
+```
+
+---
+
+## Profiling Before Memoizing
+
+Always measure before adding memoization:
+
+### Step 1: Identify the Problem
+
+```tsx
+// Add profiling to suspect component
+function ExpensiveComponent({ data }: Props) {
+  console.time('ExpensiveComponent render');
+
+  const result = /* ... */;
+
+  console.timeEnd('ExpensiveComponent render');
+  return result;
+}
+```
+
+### Step 2: Use React DevTools Profiler
+
+1. Open React DevTools
+2. Go to Profiler tab
+3. Click Record
+4. Interact with your app
+5. Stop recording
+6. Look for components with:
+   - High render times (> 16ms)
+   - Frequent unnecessary re-renders
+
+### Step 3: Measure Impact
+
+```tsx
+// Before: Note render time and frequency
+function Component({ data }: Props) {
+  const result = expensiveOperation(data);
+  return <div>{result}</div>;
+}
+
+// After: Compare metrics
+function Component({ data }: Props) {
+  const result = useMemo(
+    () => expensiveOperation(data),
+    [data]
+  );
+  return <div>{result}</div>;
+}
+```
+
+---
+
+## Memoization Decision Table
+
+| Scenario | memo | useMemo | useCallback |
+|----------|------|---------|-------------|
+| Expensive component, stable props | Yes | - | - |
+| Expensive calculation | - | Yes | - |
+| Function passed to memo'd child | - | - | Yes |
+| Object/array passed to memo'd child | - | Yes | - |
+| Simple component | No | - | - |
+| Cheap calculation | - | No | - |
+| Function not passed to memo'd child | - | - | No |
+
+---
+
+## Alternatives to Memoization
+
+### 1. Move State Down
+
+```tsx
+// Instead of memoizing ExpensiveChild
+function Parent() {
+  return (
+    <div>
+      <CounterSection /> {/* State isolated here */}
+      <ExpensiveChild /> {/* No longer re-renders */}
+    </div>
+  );
+}
+```
+
+### 2. Lift Content Up
+
+```tsx
+// Instead of memoizing children
+function Parent({ children }: Props) {
+  const [count, setCount] = useState(0);
+  return (
+    <div>
+      <button onClick={() => setCount(c => c + 1)}>{count}</button>
+      {children} {/* Stable reference from parent */}
+    </div>
+  );
+}
+```
+
+### 3. Split Components
+
+```tsx
+// Instead of memoizing part of a component
+function UserCard({ user, onlineStatus }: Props) {
+  return (
+    <div>
+      <UserInfo user={user} />
+      <OnlineIndicator status={onlineStatus} />
+    </div>
+  );
+}
+
+// Split into:
+function UserInfo({ user }: { user: User }) { /* ... */ }
+const OnlineIndicator = memo(function OnlineIndicator({ status }: Props) {
+  /* expensive visualization */
+});
+```
+
+---
+
+## Common Mistakes
+
+### 1. Missing Dependencies
+
+```tsx
+// Bug: stale closure
+const handleClick = useCallback(() => {
+  console.log(count); // Always logs initial count
+}, []); // Missing count dependency
+
+// Fix
+const handleClick = useCallback(() => {
+  console.log(count);
+}, [count]);
+```
+
+### 2. Memoizing Inside Loops
+
+```tsx
+// Error: Hooks can't be called conditionally or in loops
+function List({ items }: Props) {
+  return items.map(item => {
+    const memoized = useMemo(() => process(item), [item]); // Error!
+    return <Item key={item.id} data={memoized} />;
+  });
+}
+
+// Fix: Move to child component
+function List({ items }: Props) {
+  return items.map(item => (
+    <MemoizedItem key={item.id} item={item} />
+  ));
+}
+
+const MemoizedItem = memo(function Item({ item }: Props) {
+  const processed = useMemo(() => process(item), [item]);
+  return <div>{processed}</div>;
+});
+```
+
+### 3. Wrapping Everything in memo
+
+```tsx
+// Anti-pattern: Memoizing all components
+export const Button = memo(Button);
+export const Input = memo(Input);
+export const Label = memo(Label);
+// ... every component
+
+// These components are cheap to render
+// memo adds comparison overhead with no benefit
+```
+
+<Callout type="info" title="Rule of Thumb">
+Memoization is an optimization. Profile first, then apply selectively to proven bottlenecks.
+</Callout>

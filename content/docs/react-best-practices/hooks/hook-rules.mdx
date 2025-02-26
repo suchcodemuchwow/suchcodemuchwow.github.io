@@ -1,0 +1,546 @@
+---
+title: Rules of Hooks
+description: Understanding and following React's hook rules
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## Overview
+
+React hooks must follow strict rules to work correctly. These rules exist because React relies on call order to track hook state between renders. Breaking these rules causes bugs, stale state, and unpredictable behavior.
+
+---
+
+## The Rules at a Glance
+
+| Rule | Description |
+|------|-------------|
+| Top level only | Call hooks at the top level of your component |
+| React functions only | Call hooks from function components or custom hooks |
+| Same order every render | Hooks must be called in the same order each render |
+| No conditions | Never wrap hooks in if/else or ternary |
+| No loops | Never call hooks inside for/while loops |
+| No nested functions | Never call hooks inside callbacks or event handlers |
+
+---
+
+## Common Violations
+
+| Violation | Why It Breaks | Fix |
+|-----------|---------------|-----|
+| Hook inside if statement | Different hook count per render | Move condition inside hook |
+| Hook after early return | Hook may not be called | Call all hooks before returns |
+| Hook in loop | Variable hook count | Extract to child component |
+| Hook in event handler | Called outside render | Move to component level |
+| Hook in regular function | Not a React function | Rename to useX or make component |
+
+---
+
+## Why Rules Exist
+
+React hooks rely on call order to maintain state between renders. React doesn't use names or keys to track hooks; it uses the order in which they're called.
+
+```tsx
+// React tracks hooks by call order:
+function Component() {
+  // Hook #1
+  const [name, setName] = useState('');
+  // Hook #2
+  const [age, setAge] = useState(0);
+  // Hook #3
+  useEffect(() => {}, []);
+}
+
+// Each render must call hooks in the same order
+// for React to match state to the correct hook
+```
+
+### What Happens When Rules Break
+
+```tsx
+function BrokenComponent({ condition }) {
+  // Render 1: condition = true
+  if (condition) {
+    useState('Alice'); // Hook #1
+  }
+  useState(0);         // Hook #2
+
+  // Render 2: condition = false
+  // Hook #1 is now useState(0), but React thinks it's useState('Alice')
+  // State gets mismatched, bugs ensue
+}
+```
+
+---
+
+## The Two Rules
+
+### Rule 1: Only Call Hooks at the Top Level
+
+Do not call hooks inside:
+- Loops
+- Conditions
+- Nested functions
+
+```tsx
+// Bad: hook in condition
+function Bad({ showName }) {
+  if (showName) {
+    const [name, setName] = useState(''); // Breaks rule
+  }
+}
+
+// Bad: hook in loop
+function Bad({ count }) {
+  for (let i = 0; i < count; i++) {
+    useEffect(() => {}, []); // Breaks rule
+  }
+}
+
+// Bad: hook in nested function
+function Bad() {
+  const handleClick = () => {
+    const [clicked, setClicked] = useState(false); // Breaks rule
+  };
+}
+```
+
+### Rule 2: Only Call Hooks from React Functions
+
+Call hooks only from:
+- React function components
+- Custom hooks (functions starting with `use`)
+
+```tsx
+// Good: function component
+function Component() {
+  const [state, setState] = useState(0);
+}
+
+// Good: custom hook
+function useCustomHook() {
+  const [state, setState] = useState(0);
+  return state;
+}
+
+// Bad: regular function
+function helperFunction() {
+  const [state, setState] = useState(0); // Breaks rule
+}
+
+// Bad: class component
+class Component extends React.Component {
+  render() {
+    const [state, setState] = useState(0); // Breaks rule
+  }
+}
+```
+
+---
+
+## Conditional Hooks Workarounds
+
+### Pattern 1: Conditional Logic Inside Hook
+
+```tsx
+// Bad: conditional hook
+function UserProfile({ userId }) {
+  if (userId) {
+    const user = useUser(userId); // Breaks rule
+  }
+}
+
+// Good: condition inside hook
+function UserProfile({ userId }) {
+  const user = useUser(userId); // Always called
+}
+
+function useUser(userId: string | null) {
+  const [user, setUser] = useState<User | null>(null);
+
+  useEffect(() => {
+    if (!userId) return; // Condition inside effect
+
+    fetchUser(userId).then(setUser);
+  }, [userId]);
+
+  return user;
+}
+```
+
+### Pattern 2: Early Return After All Hooks
+
+```tsx
+// Good: return after hooks
+function UserProfile({ userId }) {
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!userId) return;
+    // fetch user...
+  }, [userId]);
+
+  // All hooks called, now safe to return early
+  if (!userId) {
+    return <div>No user selected</div>;
+  }
+
+  return <div>{user?.name}</div>;
+}
+```
+
+### Pattern 3: Component Composition
+
+```tsx
+// Bad: conditional hook
+function Dashboard({ userId }) {
+  if (userId) {
+    const user = useUser(userId);
+    return <UserDashboard user={user} />;
+  }
+  return <GuestDashboard />;
+}
+
+// Good: separate components
+function Dashboard({ userId }) {
+  if (userId) {
+    return <UserDashboard userId={userId} />;
+  }
+  return <GuestDashboard />;
+}
+
+function UserDashboard({ userId }: { userId: string }) {
+  const user = useUser(userId); // Always called when this component renders
+  return <div>{user?.name}</div>;
+}
+```
+
+### Pattern 4: Enabled/Disabled Pattern
+
+```tsx
+function useFetch<T>(url: string | null) {
+  const [data, setData] = useState<T | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!url) {
+      setData(null);
+      return;
+    }
+
+    setLoading(true);
+    fetch(url)
+      .then(res => res.json())
+      .then(setData)
+      .finally(() => setLoading(false));
+  }, [url]);
+
+  return { data, loading, enabled: url !== null };
+}
+
+// Usage
+function Component({ shouldFetch }) {
+  // Always call the hook, pass null to disable
+  const { data } = useFetch(shouldFetch ? '/api/data' : null);
+}
+```
+
+---
+
+## Loop Hooks Patterns
+
+### Problem: Hooks in Loops
+
+```tsx
+// Bad: hooks in loop
+function ItemList({ itemIds }) {
+  return (
+    <ul>
+      {itemIds.map(id => {
+        const item = useItem(id); // Breaks rule
+        return <li key={id}>{item.name}</li>;
+      })}
+    </ul>
+  );
+}
+```
+
+### Solution 1: Extract to Component
+
+```tsx
+// Good: separate component per item
+function ItemList({ itemIds }) {
+  return (
+    <ul>
+      {itemIds.map(id => (
+        <ItemRow key={id} id={id} />
+      ))}
+    </ul>
+  );
+}
+
+function ItemRow({ id }: { id: string }) {
+  const item = useItem(id); // Each component has its own hook
+  return <li>{item.name}</li>;
+}
+```
+
+### Solution 2: Batch Fetch
+
+```tsx
+// Good: single hook fetches all
+function ItemList({ itemIds }) {
+  const items = useItems(itemIds); // Fetch all at once
+
+  return (
+    <ul>
+      {items.map(item => (
+        <li key={item.id}>{item.name}</li>
+      ))}
+    </ul>
+  );
+}
+
+function useItems(ids: string[]) {
+  const [items, setItems] = useState<Item[]>([]);
+
+  useEffect(() => {
+    fetchItems(ids).then(setItems);
+  }, [ids.join(',')]); // Stringify for stable dependency
+
+  return items;
+}
+```
+
+### Solution 3: Map of Hooks (Advanced)
+
+```tsx
+// For dynamic number of subscriptions
+function useMultipleSubscriptions(channels: string[]) {
+  const [messages, setMessages] = useState<Record<string, string[]>>({});
+
+  useEffect(() => {
+    const subscriptions = channels.map(channel => {
+      return subscribe(channel, (msg) => {
+        setMessages(prev => ({
+          ...prev,
+          [channel]: [...(prev[channel] || []), msg]
+        }));
+      });
+    });
+
+    return () => {
+      subscriptions.forEach(unsub => unsub());
+    };
+  }, [channels.join(',')]);
+
+  return messages;
+}
+```
+
+---
+
+## ESLint Plugin
+
+### Setup
+
+```json
+// .eslintrc.json
+{
+  "plugins": ["react-hooks"],
+  "rules": {
+    "react-hooks/rules-of-hooks": "error",
+    "react-hooks/exhaustive-deps": "warn"
+  }
+}
+```
+
+### What It Catches
+
+| Rule | Catches |
+|------|---------|
+| `rules-of-hooks` | Hooks in conditions, loops, nested functions |
+| `exhaustive-deps` | Missing or extra dependencies in useEffect, useMemo, useCallback |
+
+### Exhaustive Deps Examples
+
+```tsx
+// Warning: missing dependency
+useEffect(() => {
+  fetchData(userId);
+}, []); // ESLint warns: userId is missing
+
+// Fixed
+useEffect(() => {
+  fetchData(userId);
+}, [userId]);
+
+// Warning: function dependency
+function Component({ onSave }) {
+  useEffect(() => {
+    onSave();
+  }, []); // ESLint warns: onSave is missing
+}
+```
+
+<Callout type="warn" title="Don't Ignore Warnings">
+The `exhaustive-deps` rule catches real bugs. If you think you need to ignore it, you probably need to restructure your code instead.
+</Callout>
+
+---
+
+## Common Violations and Fixes
+
+### Violation 1: Conditional Hook Call
+
+```tsx
+// Bad
+function Profile({ userId }) {
+  if (!userId) return null;
+  const user = useUser(userId); // Called conditionally
+}
+
+// Fix: Move return after hooks
+function Profile({ userId }) {
+  const user = useUser(userId); // Always called
+
+  if (!userId) return null;
+
+  return <div>{user?.name}</div>;
+}
+```
+
+### Violation 2: Hook in Event Handler
+
+```tsx
+// Bad
+function Form() {
+  const handleSubmit = () => {
+    const [submitted, setSubmitted] = useState(false); // Wrong
+  };
+}
+
+// Fix: Move to component level
+function Form() {
+  const [submitted, setSubmitted] = useState(false);
+
+  const handleSubmit = () => {
+    setSubmitted(true);
+  };
+}
+```
+
+### Violation 3: Hook in Regular Function
+
+```tsx
+// Bad
+function formatUser(userId) {
+  const user = useUser(userId); // Wrong - not a component or hook
+  return `${user.name} (${user.email})`;
+}
+
+// Fix 1: Make it a hook
+function useFormattedUser(userId) {
+  const user = useUser(userId);
+  return user ? `${user.name} (${user.email})` : '';
+}
+
+// Fix 2: Make it a component
+function FormattedUser({ userId }) {
+  const user = useUser(userId);
+  return <span>{user.name} ({user.email})</span>;
+}
+```
+
+### Violation 4: Dynamic Hook Count
+
+```tsx
+// Bad
+function DynamicInputs({ count }) {
+  const inputs = [];
+  for (let i = 0; i < count; i++) {
+    inputs.push(useState('')); // Different count each render
+  }
+}
+
+// Fix: Single state for all
+function DynamicInputs({ count }) {
+  const [values, setValues] = useState<string[]>(() =>
+    Array(count).fill('')
+  );
+
+  const updateValue = (index: number, value: string) => {
+    setValues(prev => {
+      const next = [...prev];
+      next[index] = value;
+      return next;
+    });
+  };
+}
+```
+
+### Violation 5: Hook After Early Return
+
+```tsx
+// Bad
+function Component({ data }) {
+  if (!data) {
+    return <Loading />;
+  }
+
+  const processed = useMemo(() => process(data), [data]); // After return
+}
+
+// Fix: Hooks before any returns
+function Component({ data }) {
+  const processed = useMemo(
+    () => data ? process(data) : null,
+    [data]
+  );
+
+  if (!data) {
+    return <Loading />;
+  }
+
+  return <Display data={processed} />;
+}
+```
+
+---
+
+## Summary Table
+
+| Scenario | Bad | Good |
+|----------|-----|------|
+| Conditional feature | `if (x) useState()` | `useState(); if (x) {...}` |
+| Loop items | `items.map(() => useX())` | Extract to `<Item />` component |
+| Early return | `if (x) return; useY()` | `useY(); if (x) return` |
+| Event handler | `onClick: () => useState()` | State at component level |
+| Helper function | `function helper() { useX() }` | `function useHelper() { useX() }` |
+| Dynamic count | `for (i < n) useState()` | Single `useState(array)` |
+
+---
+
+## Quick Reference
+
+```tsx
+// Always valid
+function Component() {
+  const [a] = useState();  // Hook #1 - always
+  const [b] = useState();  // Hook #2 - always
+  useEffect(() => {});     // Hook #3 - always
+
+  if (condition) {
+    // Logic here, not hooks
+  }
+
+  return <div />;
+}
+
+// Custom hook - must start with "use"
+function useCustom() {
+  const [state] = useState();
+  return state;
+}
+```

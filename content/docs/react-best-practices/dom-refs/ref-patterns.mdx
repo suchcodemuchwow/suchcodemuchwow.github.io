@@ -1,0 +1,333 @@
+---
+title: Ref Patterns
+description: Effective patterns for using refs in React applications
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## useRef for DOM Elements
+
+Access DOM nodes directly:
+
+```tsx
+function TextInput() {
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const focusInput = () => {
+    inputRef.current?.focus();
+  };
+
+  return (
+    <>
+      <input ref={inputRef} type="text" />
+      <button onClick={focusInput}>Focus</button>
+    </>
+  );
+}
+```
+
+---
+
+## Ref Typing in TypeScript
+
+### DOM Element Refs
+
+```tsx
+// Specific elements
+const divRef = useRef<HTMLDivElement>(null);
+const buttonRef = useRef<HTMLButtonElement>(null);
+const inputRef = useRef<HTMLInputElement>(null);
+const canvasRef = useRef<HTMLCanvasElement>(null);
+
+// Generic element
+const elementRef = useRef<HTMLElement>(null);
+```
+
+### Mutable vs Immutable Refs
+
+```tsx
+// Immutable: null initial, assigned by React
+const domRef = useRef<HTMLDivElement>(null);
+// domRef.current is readonly
+
+// Mutable: you control the value
+const valueRef = useRef<number>(0);
+valueRef.current = 42; // OK
+
+// Mutable with possible null
+const instanceRef = useRef<SomeClass | null>(null);
+instanceRef.current = new SomeClass(); // OK
+```
+
+<Callout type="info" title="Type Rule">
+`useRef<T>(null)` returns `RefObject<T>` (readonly). `useRef<T | null>(null)` returns `MutableRefObject<T | null>`.
+</Callout>
+
+---
+
+## Callback Refs
+
+For dynamic ref assignment or cleanup logic:
+
+```tsx
+function MeasuredComponent() {
+  const [height, setHeight] = useState(0);
+
+  const measuredRef = useCallback((node: HTMLDivElement | null) => {
+    if (node !== null) {
+      setHeight(node.getBoundingClientRect().height);
+    }
+  }, []);
+
+  return (
+    <>
+      <div ref={measuredRef}>Content to measure</div>
+      <p>Height: {height}px</p>
+    </>
+  );
+}
+```
+
+### Callback Ref with Cleanup
+
+```tsx
+function ObservedComponent() {
+  const observerRef = useRef<ResizeObserver | null>(null);
+
+  const callbackRef = useCallback((node: HTMLDivElement | null) => {
+    // Cleanup previous observer
+    if (observerRef.current) {
+      observerRef.current.disconnect();
+      observerRef.current = null;
+    }
+
+    // Setup new observer
+    if (node) {
+      observerRef.current = new ResizeObserver((entries) => {
+        console.log('Resized:', entries[0].contentRect);
+      });
+      observerRef.current.observe(node);
+    }
+  }, []);
+
+  return <div ref={callbackRef}>Observed content</div>;
+}
+```
+
+---
+
+## Ref Current Timing
+
+### When `.current` is Available
+
+| Phase | `.current` Value |
+|-------|------------------|
+| Initial render | `null` |
+| After DOM mount | DOM node |
+| After unmount | `null` |
+| During render | Previous value (stale) |
+
+```tsx
+function TimingExample() {
+  const ref = useRef<HTMLDivElement>(null);
+
+  // During render: ref.current is null or stale
+  console.log('Render:', ref.current); // null on first render
+
+  useEffect(() => {
+    // After mount: ref.current is the DOM node
+    console.log('Effect:', ref.current); // <div>
+  }, []);
+
+  useLayoutEffect(() => {
+    // After mount, before paint: ref.current is available
+    console.log('Layout effect:', ref.current); // <div>
+  }, []);
+
+  return <div ref={ref}>Content</div>;
+}
+```
+
+<Callout type="warn" title="Timing Gotcha">
+Never read `ref.current` during render for DOM refs. It may be `null` or stale. Use effects or event handlers instead.
+</Callout>
+
+---
+
+## Multiple Refs Patterns
+
+### Separate Refs
+
+```tsx
+function Form() {
+  const firstNameRef = useRef<HTMLInputElement>(null);
+  const lastNameRef = useRef<HTMLInputElement>(null);
+  const emailRef = useRef<HTMLInputElement>(null);
+
+  const focusNext = (current: 'first' | 'last') => {
+    if (current === 'first') lastNameRef.current?.focus();
+    else emailRef.current?.focus();
+  };
+
+  return (
+    <form>
+      <input ref={firstNameRef} onKeyDown={e => e.key === 'Enter' && focusNext('first')} />
+      <input ref={lastNameRef} onKeyDown={e => e.key === 'Enter' && focusNext('last')} />
+      <input ref={emailRef} />
+    </form>
+  );
+}
+```
+
+### Ref Map for Dynamic Elements
+
+```tsx
+function ItemList({ items }: { items: Item[] }) {
+  const itemRefs = useRef<Map<string, HTMLLIElement>>(new Map());
+
+  const scrollToItem = (id: string) => {
+    const node = itemRefs.current.get(id);
+    node?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  return (
+    <ul>
+      {items.map(item => (
+        <li
+          key={item.id}
+          ref={(node) => {
+            if (node) {
+              itemRefs.current.set(item.id, node);
+            } else {
+              itemRefs.current.delete(item.id);
+            }
+          }}
+        >
+          {item.name}
+        </li>
+      ))}
+    </ul>
+  );
+}
+```
+
+### Merging Refs
+
+```tsx
+function mergeRefs<T>(...refs: (React.Ref<T> | undefined)[]): React.RefCallback<T> {
+  return (value) => {
+    refs.forEach(ref => {
+      if (typeof ref === 'function') {
+        ref(value);
+      } else if (ref != null) {
+        (ref as React.MutableRefObject<T | null>).current = value;
+      }
+    });
+  };
+}
+
+// Usage
+function Input({ inputRef }: { inputRef?: React.Ref<HTMLInputElement> }) {
+  const internalRef = useRef<HTMLInputElement>(null);
+
+  return <input ref={mergeRefs(internalRef, inputRef)} />;
+}
+```
+
+---
+
+## When Refs Are Appropriate
+
+### Use Refs For
+
+| Use Case | Example |
+|----------|---------|
+| DOM manipulation | Focus, scroll, measure |
+| Imperative animations | Canvas, video controls |
+| Storing previous values | Previous props/state |
+| Instance variables | Timers, subscriptions |
+| Third-party DOM libraries | Map widgets, rich editors |
+
+### Avoid Refs For
+
+| Anti-Pattern | Better Alternative |
+|--------------|-------------------|
+| Storing render data | Use state |
+| Triggering re-renders | Use state |
+| Communicating with children | Use props |
+| Reading DOM during render | Use effects |
+
+---
+
+## Refs vs State Decision
+
+```tsx
+// Question: Should this be a ref or state?
+
+// Use STATE when:
+// - Value changes should trigger re-render
+// - Value is displayed in UI
+// - Value is passed to children as props
+
+// Use REF when:
+// - Value changes should NOT trigger re-render
+// - Value is only used in event handlers/effects
+// - You need to persist a mutable value across renders
+```
+
+### Decision Examples
+
+```tsx
+function SearchComponent() {
+  // STATE: displayed in UI, triggers re-render
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<Result[]>([]);
+
+  // REF: not displayed, shouldn't trigger re-render
+  const debounceTimerRef = useRef<number | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const handleSearch = (value: string) => {
+    setQuery(value);
+
+    // Clear previous timer (ref: no re-render needed)
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+
+    // Cancel previous request (ref: no re-render needed)
+    abortControllerRef.current?.abort();
+
+    debounceTimerRef.current = window.setTimeout(async () => {
+      abortControllerRef.current = new AbortController();
+      const data = await fetchResults(value, abortControllerRef.current.signal);
+      setResults(data); // State: triggers re-render to show results
+    }, 300);
+  };
+
+  return (
+    <div>
+      <input
+        ref={inputRef}
+        value={query}
+        onChange={e => handleSearch(e.target.value)}
+      />
+      <ResultsList results={results} />
+    </div>
+  );
+}
+```
+
+### Quick Reference
+
+| Scenario | Use |
+|----------|-----|
+| Form input value | State |
+| Timer ID | Ref |
+| Previous value tracking | Ref |
+| Toggle visibility | State |
+| DOM node access | Ref |
+| List of selected IDs | State |
+| Abort controller | Ref |
+| Animation frame ID | Ref |

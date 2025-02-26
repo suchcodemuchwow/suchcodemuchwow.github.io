@@ -1,0 +1,434 @@
+---
+title: Deferred Values
+description: Deferring expensive re-renders with useDeferredValue
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## useDeferredValue Hook
+
+`useDeferredValue` accepts a value and returns a deferred version that may "lag behind" during updates:
+
+```tsx
+import { useDeferredValue, useState } from 'react';
+
+function SearchResults({ query }: { query: string }) {
+  const deferredQuery = useDeferredValue(query);
+
+  // deferredQuery updates with lower priority
+  // allowing the input to remain responsive
+  return <ExpensiveList filter={deferredQuery} />;
+}
+```
+
+---
+
+## How It Works
+
+1. Initial render: Deferred value equals the current value
+2. During updates: React first renders with the old deferred value
+3. Then: React renders again with the new value in the background
+4. If interrupted: Background render is discarded, urgent updates take priority
+
+```tsx
+function App() {
+  const [text, setText] = useState('');
+  const deferredText = useDeferredValue(text);
+
+  // On every keystroke:
+  // 1. text updates immediately (urgent)
+  // 2. deferredText updates in background (can be interrupted)
+
+  return (
+    <div>
+      <input value={text} onChange={(e) => setText(e.target.value)} />
+      <SlowList text={deferredText} />
+    </div>
+  );
+}
+```
+
+---
+
+## Difference from Transitions
+
+| Aspect | useDeferredValue | useTransition |
+|--------|------------------|---------------|
+| What you control | A value | A state update |
+| Where to use | Consuming props/state | Setting state |
+| Returns | Deferred value | [isPending, startTransition] |
+| Pending state | Compare values manually | Built-in isPending |
+| Use case | Props from parent | State you control |
+
+### When to Use Which
+
+```tsx
+// Use useTransition when YOU control the state update
+function Parent() {
+  const [query, setQuery] = useState('');
+  const [isPending, startTransition] = useTransition();
+
+  function handleChange(value: string) {
+    startTransition(() => {
+      setQuery(value);
+    });
+  }
+}
+
+// Use useDeferredValue when you receive the value as a prop
+function Child({ query }: { query: string }) {
+  const deferredQuery = useDeferredValue(query);
+  // Use deferredQuery for expensive operations
+}
+```
+
+<Callout type="info" title="Rule of Thumb">
+If you can wrap the `setState` call, use `useTransition`. If you only have access to the value (like a prop), use `useDeferredValue`.
+</Callout>
+
+---
+
+## Stale UI Indication
+
+Detect when showing stale content by comparing values:
+
+```tsx
+function SearchResults({ query }: { query: string }) {
+  const deferredQuery = useDeferredValue(query);
+  const isStale = query !== deferredQuery;
+
+  return (
+    <div style={{ opacity: isStale ? 0.7 : 1 }}>
+      <ResultsList query={deferredQuery} />
+    </div>
+  );
+}
+```
+
+### Visual Feedback Patterns
+
+| Pattern | Implementation |
+|---------|----------------|
+| Opacity reduction | `style={{ opacity: isStale ? 0.7 : 1 }}` |
+| Grayscale | `style={{ filter: isStale ? 'grayscale(50%)' : 'none' }}` |
+| Loading indicator | `{isStale && <SmallSpinner />}` |
+| CSS transition | Smooth opacity changes |
+
+```tsx
+function DeferredContent({ value }: { value: string }) {
+  const deferredValue = useDeferredValue(value);
+  const isStale = value !== deferredValue;
+
+  return (
+    <div
+      style={{
+        opacity: isStale ? 0.6 : 1,
+        transition: 'opacity 0.2s',
+      }}
+    >
+      <ExpensiveComponent value={deferredValue} />
+    </div>
+  );
+}
+```
+
+---
+
+## Performance Benefits
+
+### Without useDeferredValue
+
+```tsx
+function SlowSearch() {
+  const [query, setQuery] = useState('');
+
+  // Every keystroke triggers expensive render
+  // Input becomes unresponsive
+  return (
+    <div>
+      <input value={query} onChange={(e) => setQuery(e.target.value)} />
+      <ExpensiveList filter={query} />
+    </div>
+  );
+}
+```
+
+### With useDeferredValue
+
+```tsx
+function FastSearch() {
+  const [query, setQuery] = useState('');
+  const deferredQuery = useDeferredValue(query);
+
+  // Input stays responsive
+  // List updates when React has time
+  return (
+    <div>
+      <input value={query} onChange={(e) => setQuery(e.target.value)} />
+      <ExpensiveList filter={deferredQuery} />
+    </div>
+  );
+}
+```
+
+---
+
+## Use Cases
+
+### Search Results
+
+```tsx
+function SearchPage() {
+  const [query, setQuery] = useState('');
+  const deferredQuery = useDeferredValue(query);
+  const isSearching = query !== deferredQuery;
+
+  return (
+    <div>
+      <input
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        placeholder="Search..."
+      />
+
+      <div style={{ opacity: isSearching ? 0.5 : 1 }}>
+        <SearchResults query={deferredQuery} />
+      </div>
+    </div>
+  );
+}
+
+function SearchResults({ query }: { query: string }) {
+  // Expensive filtering
+  const results = items.filter(item =>
+    item.name.toLowerCase().includes(query.toLowerCase())
+  );
+
+  return (
+    <ul>
+      {results.map(item => (
+        <li key={item.id}>{item.name}</li>
+      ))}
+    </ul>
+  );
+}
+```
+
+### Large Lists
+
+```tsx
+function LargeListPage() {
+  const [filter, setFilter] = useState('');
+  const deferredFilter = useDeferredValue(filter);
+
+  return (
+    <div>
+      <FilterControls value={filter} onChange={setFilter} />
+      <VirtualizedList filter={deferredFilter} items={thousandsOfItems} />
+    </div>
+  );
+}
+```
+
+### Syntax Highlighting
+
+```tsx
+function CodeEditor() {
+  const [code, setCode] = useState('');
+  const deferredCode = useDeferredValue(code);
+  const isHighlighting = code !== deferredCode;
+
+  return (
+    <div className="editor">
+      <textarea
+        value={code}
+        onChange={(e) => setCode(e.target.value)}
+      />
+      <div
+        className="preview"
+        style={{ opacity: isHighlighting ? 0.8 : 1 }}
+      >
+        <SyntaxHighlighter code={deferredCode} />
+      </div>
+    </div>
+  );
+}
+```
+
+### Chart Updates
+
+```tsx
+function Dashboard({ data }: { data: DataPoint[] }) {
+  const deferredData = useDeferredValue(data);
+  const isUpdating = data !== deferredData;
+
+  return (
+    <div style={{ position: 'relative' }}>
+      {isUpdating && <LoadingOverlay />}
+      <ExpensiveChart data={deferredData} />
+    </div>
+  );
+}
+```
+
+---
+
+## Combining with memo
+
+`useDeferredValue` works best with memoized components:
+
+```tsx
+import { memo, useDeferredValue, useMemo, useState } from 'react';
+
+function App() {
+  const [query, setQuery] = useState('');
+  const deferredQuery = useDeferredValue(query);
+
+  return (
+    <div>
+      <input value={query} onChange={(e) => setQuery(e.target.value)} />
+      <SlowList query={deferredQuery} />
+    </div>
+  );
+}
+
+// Memoize to skip re-render when deferred value hasn't changed
+const SlowList = memo(function SlowList({ query }: { query: string }) {
+  const items = useMemo(() => {
+    return generateItems(query); // Expensive computation
+  }, [query]);
+
+  return (
+    <ul>
+      {items.map(item => (
+        <li key={item.id}>{item.text}</li>
+      ))}
+    </ul>
+  );
+});
+```
+
+<Callout type="warn" title="Important">
+Without `memo`, the component re-renders on every keystroke even with `useDeferredValue`. The deferred value helps only when combined with memoization.
+</Callout>
+
+### The Full Pattern
+
+```tsx
+// 1. Parent manages state
+function Parent() {
+  const [value, setValue] = useState('');
+  const deferredValue = useDeferredValue(value);
+  const isStale = value !== deferredValue;
+
+  return (
+    <div>
+      <input value={value} onChange={(e) => setValue(e.target.value)} />
+      <div style={{ opacity: isStale ? 0.7 : 1 }}>
+        <MemoizedChild value={deferredValue} />
+      </div>
+    </div>
+  );
+}
+
+// 2. Child is memoized
+const MemoizedChild = memo(function Child({ value }: { value: string }) {
+  // 3. Expensive computation is also memoized
+  const processed = useMemo(() => expensiveProcess(value), [value]);
+
+  return <ExpensiveRender data={processed} />;
+});
+```
+
+---
+
+## When to Use Which Approach
+
+| Scenario | Approach |
+|----------|----------|
+| You control the setState | useTransition |
+| Value comes from props | useDeferredValue |
+| Need isPending state | useTransition |
+| Wrapping existing component | useDeferredValue |
+| Network request limiting | Debounce |
+| CPU-intensive filtering | useDeferredValue + memo |
+
+### Decision Flow
+
+1. Is the slowdown from **network requests**? Use debounce
+2. Do you **control the state update**? Use useTransition
+3. Is the value a **prop you receive**? Use useDeferredValue
+4. Is the child component **expensive to render**? Add memo
+
+---
+
+## Common Mistakes
+
+### 1. Forgetting memo
+
+```tsx
+// useDeferredValue alone doesn't help
+function Parent() {
+  const [query, setQuery] = useState('');
+  const deferredQuery = useDeferredValue(query);
+
+  return <Child query={deferredQuery} />; // Still re-renders every time!
+}
+
+// Add memo to skip unnecessary re-renders
+const Child = memo(function Child({ query }: { query: string }) {
+  // ...
+});
+```
+
+### 2. Deferring Cheap Values
+
+```tsx
+// Unnecessary - simple string display is fast
+const deferredName = useDeferredValue(name);
+return <span>{deferredName}</span>;
+
+// Only defer when the consuming operation is expensive
+const deferredQuery = useDeferredValue(query);
+return <ExpensiveFilteredList query={deferredQuery} />;
+```
+
+### 3. Using for Network Requests
+
+```tsx
+// Won't help - delay is network, not rendering
+function Search({ query }: { query: string }) {
+  const deferredQuery = useDeferredValue(query);
+  const { data } = useFetch(`/api/search?q=${deferredQuery}`);
+  // ...
+}
+
+// Better: Debounce the fetch itself
+```
+
+### 4. Missing Stale Indicator
+
+```tsx
+// Bad: User doesn't know results are outdated
+const deferredQuery = useDeferredValue(query);
+return <Results query={deferredQuery} />;
+
+// Good: Visual feedback for stale state
+const deferredQuery = useDeferredValue(query);
+const isStale = query !== deferredQuery;
+return (
+  <div style={{ opacity: isStale ? 0.5 : 1 }}>
+    <Results query={deferredQuery} />
+  </div>
+);
+```
+
+---
+
+## Best Practices
+
+1. **Always combine with memo** — useDeferredValue alone doesn't prevent re-renders
+2. **Show stale state visually** — Users should know when content is outdated
+3. **Use for CPU-bound work only** — Not for network request optimization
+4. **Profile first** — Ensure there's actually a performance problem
+5. **Keep deferred scope minimal** — Only defer what's actually slow

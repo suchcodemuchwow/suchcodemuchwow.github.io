@@ -1,0 +1,723 @@
+---
+title: Integration Testing Patterns
+description: Patterns and strategies for integration testing React applications, including testing component hierarchies, data flows, and realistic user scenarios
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+# Integration Testing Patterns
+
+Integration tests verify that multiple units work together correctly. In React, this means testing how components interact, how data flows through the application, and how user actions trigger expected outcomes across multiple parts of the system.
+
+## What Makes an Integration Test
+
+| Unit Test | Integration Test |
+|-----------|------------------|
+| Tests a single function or component | Tests multiple components working together |
+| Heavy mocking | Minimal mocking (usually just network) |
+| Fast, isolated | Slightly slower, more realistic |
+| Tests implementation | Tests user flows |
+
+<Callout type="info">
+Integration tests provide the highest confidence-to-effort ratio for React applications. They test real user scenarios without the complexity of E2E tests.
+</Callout>
+
+## Setting Up Integration Tests
+
+### Test Utilities Setup
+
+```typescript
+// src/test/integration-utils.tsx
+import { ReactElement } from 'react';
+import { render, RenderOptions } from '@testing-library/react';
+import { BrowserRouter } from 'react-router-dom';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { AuthProvider } from '../contexts/AuthContext';
+import { ThemeProvider } from '../contexts/ThemeContext';
+
+function createTestQueryClient() {
+  return new QueryClient({
+    defaultOptions: {
+      queries: {
+        retry: false,
+        gcTime: Infinity,
+      },
+      mutations: {
+        retry: false,
+      },
+    },
+    logger: {
+      log: console.log,
+      warn: console.warn,
+      error: () => {}, // Silence errors in tests
+    },
+  });
+}
+
+interface IntegrationRenderOptions extends Omit<RenderOptions, 'wrapper'> {
+  route?: string;
+  initialUser?: User | null;
+}
+
+export function renderApp(
+  ui: ReactElement,
+  {
+    route = '/',
+    initialUser = null,
+    ...renderOptions
+  }: IntegrationRenderOptions = {}
+) {
+  window.history.pushState({}, 'Test page', route);
+
+  const queryClient = createTestQueryClient();
+
+  function Wrapper({ children }: { children: React.ReactNode }) {
+    return (
+      <QueryClientProvider client={queryClient}>
+        <BrowserRouter>
+          <AuthProvider initialUser={initialUser}>
+            <ThemeProvider>{children}</ThemeProvider>
+          </AuthProvider>
+        </BrowserRouter>
+      </QueryClientProvider>
+    );
+  }
+
+  return {
+    ...render(ui, { wrapper: Wrapper, ...renderOptions }),
+    queryClient,
+  };
+}
+
+export * from '@testing-library/react';
+export { renderApp };
+```
+
+### MSW for Network Mocking
+
+```bash
+npm install -D msw
+```
+
+```typescript
+// src/test/mocks/handlers.ts
+import { http, HttpResponse } from 'msw';
+
+export const handlers = [
+  http.get('/api/user', () => {
+    return HttpResponse.json({
+      id: '1',
+      name: 'John Doe',
+      email: 'john@example.com',
+    });
+  }),
+
+  http.get('/api/products', () => {
+    return HttpResponse.json([
+      { id: '1', name: 'Product A', price: 29.99 },
+      { id: '2', name: 'Product B', price: 49.99 },
+    ]);
+  }),
+
+  http.post('/api/orders', async ({ request }) => {
+    const body = await request.json();
+    return HttpResponse.json({ orderId: 'order-123', ...body }, { status: 201 });
+  }),
+];
+
+// src/test/mocks/server.ts
+import { setupServer } from 'msw/node';
+import { handlers } from './handlers';
+
+export const server = setupServer(...handlers);
+
+// src/test/setup.ts
+import '@testing-library/jest-dom/vitest';
+import { cleanup } from '@testing-library/react';
+import { afterAll, afterEach, beforeAll } from 'vitest';
+import { server } from './mocks/server';
+
+beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
+afterEach(() => {
+  cleanup();
+  server.resetHandlers();
+});
+afterAll(() => server.close());
+```
+
+## Testing Page Components
+
+### Full Page Test
+
+```typescript
+// Dashboard.integration.test.tsx
+import { screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { renderApp } from '../test/integration-utils';
+import { App } from '../App';
+
+describe('Dashboard Page', () => {
+  it('displays user data after login', async () => {
+    const user = userEvent.setup();
+    renderApp(<App />, { route: '/login' });
+
+    // Fill in login form
+    await user.type(screen.getByLabelText('Email'), 'john@example.com');
+    await user.type(screen.getByLabelText('Password'), 'password123');
+    await user.click(screen.getByRole('button', { name: 'Sign in' }));
+
+    // Wait for redirect and data load
+    await waitFor(() => {
+      expect(screen.getByText('Welcome, John Doe')).toBeInTheDocument();
+    });
+
+    // Verify dashboard content
+    expect(screen.getByRole('heading', { name: 'Dashboard' })).toBeInTheDocument();
+    expect(screen.getByText('Recent Activity')).toBeInTheDocument();
+  });
+
+  it('shows error message on login failure', async () => {
+    // Override handler for this test
+    server.use(
+      http.post('/api/auth/login', () => {
+        return HttpResponse.json(
+          { message: 'Invalid credentials' },
+          { status: 401 }
+        );
+      })
+    );
+
+    const user = userEvent.setup();
+    renderApp(<App />, { route: '/login' });
+
+    await user.type(screen.getByLabelText('Email'), 'wrong@example.com');
+    await user.type(screen.getByLabelText('Password'), 'wrongpassword');
+    await user.click(screen.getByRole('button', { name: 'Sign in' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toHaveTextContent('Invalid credentials');
+    });
+  });
+});
+```
+
+## Testing Multi-Step Flows
+
+### Checkout Flow
+
+```typescript
+// checkout.integration.test.tsx
+import { screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { renderApp } from '../test/integration-utils';
+import { App } from '../App';
+import { http, HttpResponse } from 'msw';
+import { server } from '../test/mocks/server';
+
+describe('Checkout Flow', () => {
+  const mockUser = { id: '1', name: 'John Doe', email: 'john@example.com' };
+
+  it('completes full checkout process', async () => {
+    const user = userEvent.setup();
+    renderApp(<App />, { route: '/products', initialUser: mockUser });
+
+    // Wait for products to load
+    await screen.findByText('Product A');
+
+    // Add item to cart
+    const productCard = screen.getByTestId('product-1');
+    await user.click(within(productCard).getByRole('button', { name: 'Add to cart' }));
+
+    // Verify cart badge updates
+    expect(screen.getByLabelText('Cart items')).toHaveTextContent('1');
+
+    // Navigate to cart
+    await user.click(screen.getByRole('link', { name: /cart/i }));
+
+    // Verify cart contents
+    expect(screen.getByText('Product A')).toBeInTheDocument();
+    expect(screen.getByText('$29.99')).toBeInTheDocument();
+
+    // Proceed to checkout
+    await user.click(screen.getByRole('button', { name: 'Checkout' }));
+
+    // Fill shipping info
+    await user.type(screen.getByLabelText('Address'), '123 Main St');
+    await user.type(screen.getByLabelText('City'), 'San Francisco');
+    await user.selectOptions(screen.getByLabelText('State'), 'CA');
+    await user.type(screen.getByLabelText('ZIP'), '94102');
+
+    // Continue to payment
+    await user.click(screen.getByRole('button', { name: 'Continue to payment' }));
+
+    // Fill payment info
+    await user.type(screen.getByLabelText('Card number'), '4242424242424242');
+    await user.type(screen.getByLabelText('Expiry'), '12/25');
+    await user.type(screen.getByLabelText('CVC'), '123');
+
+    // Place order
+    await user.click(screen.getByRole('button', { name: 'Place order' }));
+
+    // Verify success
+    await waitFor(() => {
+      expect(screen.getByText('Order confirmed!')).toBeInTheDocument();
+      expect(screen.getByText('order-123')).toBeInTheDocument();
+    });
+  });
+
+  it('handles payment failure gracefully', async () => {
+    server.use(
+      http.post('/api/orders', () => {
+        return HttpResponse.json(
+          { message: 'Payment declined' },
+          { status: 402 }
+        );
+      })
+    );
+
+    const user = userEvent.setup();
+    renderApp(<App />, { route: '/checkout/payment', initialUser: mockUser });
+
+    // Assume cart has items (test setup)
+    await user.type(screen.getByLabelText('Card number'), '4000000000000002');
+    await user.type(screen.getByLabelText('Expiry'), '12/25');
+    await user.type(screen.getByLabelText('CVC'), '123');
+
+    await user.click(screen.getByRole('button', { name: 'Place order' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toHaveTextContent('Payment declined');
+    });
+
+    // User should remain on payment page
+    expect(screen.getByLabelText('Card number')).toBeInTheDocument();
+  });
+});
+```
+
+## Testing Data Management
+
+### CRUD Operations
+
+```typescript
+// todos.integration.test.tsx
+import { screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { renderApp } from '../test/integration-utils';
+import { TodoApp } from '../TodoApp';
+import { http, HttpResponse } from 'msw';
+import { server } from '../test/mocks/server';
+
+describe('Todo Management', () => {
+  const initialTodos = [
+    { id: '1', text: 'Existing todo', completed: false },
+  ];
+
+  beforeEach(() => {
+    server.use(
+      http.get('/api/todos', () => HttpResponse.json(initialTodos))
+    );
+  });
+
+  it('creates, updates, and deletes todos', async () => {
+    const user = userEvent.setup();
+
+    // Track created todo
+    let createdTodo = { id: '2', text: '', completed: false };
+
+    server.use(
+      http.post('/api/todos', async ({ request }) => {
+        const { text } = await request.json() as { text: string };
+        createdTodo = { id: '2', text, completed: false };
+        return HttpResponse.json(createdTodo, { status: 201 });
+      }),
+      http.patch('/api/todos/:id', async ({ params, request }) => {
+        const updates = await request.json();
+        return HttpResponse.json({ ...createdTodo, ...updates });
+      }),
+      http.delete('/api/todos/:id', () => {
+        return new HttpResponse(null, { status: 204 });
+      })
+    );
+
+    renderApp(<TodoApp />);
+
+    // Wait for initial load
+    await screen.findByText('Existing todo');
+
+    // Create new todo
+    await user.type(screen.getByPlaceholderText('Add a todo'), 'New integration test');
+    await user.click(screen.getByRole('button', { name: 'Add' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('New integration test')).toBeInTheDocument();
+    });
+
+    // Toggle completion
+    const newTodoItem = screen.getByText('New integration test').closest('li')!;
+    await user.click(within(newTodoItem).getByRole('checkbox'));
+
+    await waitFor(() => {
+      expect(within(newTodoItem).getByRole('checkbox')).toBeChecked();
+    });
+
+    // Delete todo
+    await user.click(within(newTodoItem).getByRole('button', { name: 'Delete' }));
+
+    await waitFor(() => {
+      expect(screen.queryByText('New integration test')).not.toBeInTheDocument();
+    });
+  });
+
+  it('handles network errors gracefully', async () => {
+    server.use(
+      http.get('/api/todos', () => HttpResponse.error())
+    );
+
+    renderApp(<TodoApp />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toHaveTextContent(/failed to load/i);
+    });
+
+    // Retry button should be available
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+  });
+});
+```
+
+## Testing Navigation and Routing
+
+```typescript
+// navigation.integration.test.tsx
+import { screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { renderApp } from '../test/integration-utils';
+import { App } from '../App';
+
+describe('Navigation', () => {
+  it('navigates between pages correctly', async () => {
+    const user = userEvent.setup();
+    renderApp(<App />, { route: '/' });
+
+    // Verify home page
+    expect(screen.getByRole('heading', { name: 'Home' })).toBeInTheDocument();
+
+    // Navigate to products
+    await user.click(screen.getByRole('link', { name: 'Products' }));
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Products' })).toBeInTheDocument();
+    });
+
+    // Navigate to about
+    await user.click(screen.getByRole('link', { name: 'About' }));
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'About Us' })).toBeInTheDocument();
+    });
+
+    // Use browser back
+    window.history.back();
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Products' })).toBeInTheDocument();
+    });
+  });
+
+  it('redirects unauthenticated users to login', async () => {
+    renderApp(<App />, { route: '/dashboard', initialUser: null });
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Sign In' })).toBeInTheDocument();
+    });
+  });
+
+  it('preserves intended destination after login', async () => {
+    const user = userEvent.setup();
+    renderApp(<App />, { route: '/settings', initialUser: null });
+
+    // Should redirect to login
+    await waitFor(() => {
+      expect(screen.getByLabelText('Email')).toBeInTheDocument();
+    });
+
+    // Login
+    await user.type(screen.getByLabelText('Email'), 'john@example.com');
+    await user.type(screen.getByLabelText('Password'), 'password123');
+    await user.click(screen.getByRole('button', { name: 'Sign in' }));
+
+    // Should redirect to originally intended page
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Settings' })).toBeInTheDocument();
+    });
+  });
+});
+```
+
+## Testing Forms with Validation
+
+```typescript
+// registration.integration.test.tsx
+import { screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { renderApp } from '../test/integration-utils';
+import { RegistrationPage } from '../pages/Registration';
+
+describe('Registration Form', () => {
+  it('validates all fields before submission', async () => {
+    const user = userEvent.setup();
+    renderApp(<RegistrationPage />);
+
+    // Submit empty form
+    await user.click(screen.getByRole('button', { name: 'Create account' }));
+
+    // Check validation messages
+    expect(screen.getByText('Name is required')).toBeInTheDocument();
+    expect(screen.getByText('Email is required')).toBeInTheDocument();
+    expect(screen.getByText('Password is required')).toBeInTheDocument();
+  });
+
+  it('validates email format', async () => {
+    const user = userEvent.setup();
+    renderApp(<RegistrationPage />);
+
+    await user.type(screen.getByLabelText('Email'), 'invalid-email');
+    await user.tab(); // Trigger blur validation
+
+    expect(screen.getByText('Please enter a valid email')).toBeInTheDocument();
+  });
+
+  it('validates password requirements', async () => {
+    const user = userEvent.setup();
+    renderApp(<RegistrationPage />);
+
+    await user.type(screen.getByLabelText('Password'), 'short');
+    await user.tab();
+
+    expect(screen.getByText(/at least 8 characters/)).toBeInTheDocument();
+  });
+
+  it('validates password confirmation matches', async () => {
+    const user = userEvent.setup();
+    renderApp(<RegistrationPage />);
+
+    await user.type(screen.getByLabelText('Password'), 'SecurePass123!');
+    await user.type(screen.getByLabelText('Confirm password'), 'DifferentPass');
+    await user.tab();
+
+    expect(screen.getByText('Passwords do not match')).toBeInTheDocument();
+  });
+
+  it('submits form successfully with valid data', async () => {
+    const user = userEvent.setup();
+    renderApp(<RegistrationPage />);
+
+    await user.type(screen.getByLabelText('Name'), 'Jane Doe');
+    await user.type(screen.getByLabelText('Email'), 'jane@example.com');
+    await user.type(screen.getByLabelText('Password'), 'SecurePass123!');
+    await user.type(screen.getByLabelText('Confirm password'), 'SecurePass123!');
+    await user.click(screen.getByRole('checkbox', { name: /terms/i }));
+    await user.click(screen.getByRole('button', { name: 'Create account' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Account created successfully!')).toBeInTheDocument();
+    });
+  });
+});
+```
+
+## Testing Real-time Features
+
+```typescript
+// chat.integration.test.tsx
+import { screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { renderApp } from '../test/integration-utils';
+import { ChatRoom } from '../components/ChatRoom';
+import { act } from '@testing-library/react';
+
+// Mock WebSocket
+class MockWebSocket {
+  static instances: MockWebSocket[] = [];
+  onmessage: ((event: MessageEvent) => void) | null = null;
+  onopen: (() => void) | null = null;
+  onclose: (() => void) | null = null;
+  readyState = WebSocket.OPEN;
+
+  constructor(public url: string) {
+    MockWebSocket.instances.push(this);
+    setTimeout(() => this.onopen?.(), 0);
+  }
+
+  send = vi.fn();
+  close = vi.fn();
+
+  simulateMessage(data: unknown) {
+    this.onmessage?.({ data: JSON.stringify(data) } as MessageEvent);
+  }
+}
+
+describe('ChatRoom', () => {
+  beforeEach(() => {
+    MockWebSocket.instances = [];
+    vi.stubGlobal('WebSocket', MockWebSocket);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('displays incoming messages', async () => {
+    renderApp(<ChatRoom roomId="room-1" />);
+
+    await waitFor(() => {
+      expect(MockWebSocket.instances).toHaveLength(1);
+    });
+
+    const ws = MockWebSocket.instances[0];
+
+    act(() => {
+      ws.simulateMessage({
+        type: 'message',
+        user: 'Alice',
+        text: 'Hello everyone!',
+        timestamp: Date.now(),
+      });
+    });
+
+    expect(screen.getByText('Hello everyone!')).toBeInTheDocument();
+    expect(screen.getByText('Alice')).toBeInTheDocument();
+  });
+
+  it('sends messages through WebSocket', async () => {
+    const user = userEvent.setup();
+    renderApp(<ChatRoom roomId="room-1" />);
+
+    await waitFor(() => {
+      expect(MockWebSocket.instances).toHaveLength(1);
+    });
+
+    const ws = MockWebSocket.instances[0];
+
+    await user.type(screen.getByPlaceholderText('Type a message...'), 'Hi there!');
+    await user.click(screen.getByRole('button', { name: 'Send' }));
+
+    expect(ws.send).toHaveBeenCalledWith(
+      JSON.stringify({ type: 'message', text: 'Hi there!' })
+    );
+  });
+
+  it('shows connection status', async () => {
+    renderApp(<ChatRoom roomId="room-1" />);
+
+    // Initially connecting
+    expect(screen.getByText('Connecting...')).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(screen.getByText('Connected')).toBeInTheDocument();
+    });
+  });
+});
+```
+
+## Testing Error Boundaries
+
+```typescript
+// error-handling.integration.test.tsx
+import { screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { renderApp } from '../test/integration-utils';
+import { App } from '../App';
+
+describe('Error Handling', () => {
+  beforeEach(() => {
+    // Suppress console.error for error boundary tests
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('displays error boundary fallback on crash', async () => {
+    // Component that will throw
+    const BuggyComponent = () => {
+      throw new Error('Test crash');
+    };
+
+    renderApp(
+      <ErrorBoundary>
+        <BuggyComponent />
+      </ErrorBoundary>
+    );
+
+    expect(screen.getByText('Something went wrong')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+  });
+
+  it('recovers from error on retry', async () => {
+    const user = userEvent.setup();
+    let shouldThrow = true;
+
+    const FlakyComponent = () => {
+      if (shouldThrow) throw new Error('Test crash');
+      return <div>Content loaded</div>;
+    };
+
+    renderApp(
+      <ErrorBoundary>
+        <FlakyComponent />
+      </ErrorBoundary>
+    );
+
+    expect(screen.getByText('Something went wrong')).toBeInTheDocument();
+
+    shouldThrow = false;
+    await user.click(screen.getByRole('button', { name: 'Try again' }));
+
+    expect(screen.getByText('Content loaded')).toBeInTheDocument();
+  });
+});
+```
+
+## Pros and Cons
+
+| Pros | Cons |
+|------|------|
+| High confidence in real user flows | Slower than unit tests |
+| Catches integration bugs | More setup required |
+| Tests actual component interaction | Harder to isolate failures |
+| Minimal mocking needed | Can be harder to debug |
+| Resilient to refactoring | More complex test utilities |
+
+## When to Use
+
+Use integration tests for:
+- Multi-step user flows (checkout, registration)
+- Form submission and validation
+- Navigation between pages
+- Data fetching and display
+- State management across components
+- Error handling and recovery
+
+## When NOT to Use
+
+Do not use integration tests for:
+- Testing pure utility functions
+- Testing simple, isolated components
+- Testing third-party library behavior
+- Visual regression testing
+- Performance testing
+
+<Callout type="info">
+Integration tests should be your primary testing strategy for React applications. They provide the best balance between confidence and maintenance cost.
+</Callout>
+
+## Best Practices Summary
+
+| Practice | Description |
+|----------|-------------|
+| Mock at the network boundary | Use MSW, not component mocks |
+| Test user flows, not components | Think in terms of user goals |
+| Set up realistic providers | Include auth, routing, data fetching |
+| Handle async properly | Use `findBy` and `waitFor` |
+| Keep tests independent | Reset state between tests |
+| Test error states | Include failure scenarios |

@@ -1,0 +1,4 @@
+{
+  "title": "TypeScript",
+  "pages": ["component-types", "props-types", "event-types", "generic-components", "utility-types", "discriminated-unions"]
+}

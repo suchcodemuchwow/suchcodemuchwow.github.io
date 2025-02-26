@@ -1,0 +1,639 @@
+---
+title: Conditional Styling
+description: Patterns for applying styles conditionally in React components
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## className Patterns
+
+### Template Literals
+
+```tsx
+import styles from './Button.module.css';
+
+function Button({
+  variant = 'primary',
+  disabled
+}: {
+  variant?: 'primary' | 'secondary';
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      className={`${styles.button} ${styles[variant]} ${disabled ? styles.disabled : ''}`}
+      disabled={disabled}
+    >
+      Click me
+    </button>
+  );
+}
+```
+
+### Array Join Pattern
+
+```tsx
+function Card({ highlighted, compact }: { highlighted?: boolean; compact?: boolean }) {
+  const classes = [
+    styles.card,
+    highlighted && styles.highlighted,
+    compact && styles.compact,
+  ].filter(Boolean).join(' ');
+
+  return <div className={classes}>Content</div>;
+}
+```
+
+### Object-Based Pattern
+
+```tsx
+function getClassNames(classMap: Record<string, boolean>): string {
+  return Object.entries(classMap)
+    .filter(([, value]) => value)
+    .map(([key]) => key)
+    .join(' ');
+}
+
+// Usage
+function Alert({ type, dismissible }: { type: 'info' | 'error'; dismissible?: boolean }) {
+  const className = getClassNames({
+    [styles.alert]: true,
+    [styles.info]: type === 'info',
+    [styles.error]: type === 'error',
+    [styles.dismissible]: dismissible ?? false,
+  });
+
+  return <div className={className}>Alert content</div>;
+}
+```
+
+---
+
+## classNames Helper Function
+
+Build your own lightweight className utility:
+
+```typescript
+// utils/classNames.ts
+type ClassValue = string | undefined | null | false | ClassValue[];
+
+export function classNames(...args: ClassValue[]): string {
+  const classes: string[] = [];
+
+  for (const arg of args) {
+    if (!arg) continue;
+
+    if (typeof arg === 'string') {
+      classes.push(arg);
+    } else if (Array.isArray(arg)) {
+      const inner = classNames(...arg);
+      if (inner) classes.push(inner);
+    }
+  }
+
+  return classes.join(' ');
+}
+
+// Extended version with object support
+type ClassInput = string | undefined | null | false | Record<string, boolean> | ClassInput[];
+
+export function cx(...args: ClassInput[]): string {
+  const classes: string[] = [];
+
+  for (const arg of args) {
+    if (!arg) continue;
+
+    if (typeof arg === 'string') {
+      classes.push(arg);
+    } else if (Array.isArray(arg)) {
+      const inner = cx(...arg);
+      if (inner) classes.push(inner);
+    } else if (typeof arg === 'object') {
+      for (const [key, value] of Object.entries(arg)) {
+        if (value) classes.push(key);
+      }
+    }
+  }
+
+  return classes.join(' ');
+}
+```
+
+### Usage Examples
+
+```tsx
+import { cx } from '@/utils/classNames';
+import styles from './Button.module.css';
+
+function Button({
+  variant,
+  size,
+  disabled,
+  loading
+}: {
+  variant: 'primary' | 'secondary';
+  size: 'sm' | 'md' | 'lg';
+  disabled?: boolean;
+  loading?: boolean;
+}) {
+  return (
+    <button
+      className={cx(
+        styles.button,
+        styles[variant],
+        styles[size],
+        disabled && styles.disabled,
+        loading && styles.loading
+      )}
+    >
+      Content
+    </button>
+  );
+}
+
+// With object syntax
+function Card({ state }: { state: 'idle' | 'loading' | 'error' }) {
+  return (
+    <div
+      className={cx(styles.card, {
+        [styles.loading]: state === 'loading',
+        [styles.error]: state === 'error',
+      })}
+    >
+      Content
+    </div>
+  );
+}
+```
+
+---
+
+## Style Objects
+
+### Inline Styles for Dynamic Values
+
+```tsx
+interface ProgressBarProps {
+  value: number;
+  max: number;
+  color?: string;
+}
+
+function ProgressBar({ value, max, color }: ProgressBarProps) {
+  const percentage = Math.min(100, (value / max) * 100);
+
+  return (
+    <div className={styles.progressBar}>
+      <div
+        className={styles.progressFill}
+        style={{
+          width: `${percentage}%`,
+          backgroundColor: color,
+        }}
+      />
+    </div>
+  );
+}
+```
+
+### Computed Style Objects
+
+```tsx
+import { CSSProperties, useMemo } from 'react';
+
+interface GridProps {
+  columns: number;
+  gap: number;
+  children: React.ReactNode;
+}
+
+function Grid({ columns, gap, children }: GridProps) {
+  const style = useMemo<CSSProperties>(() => ({
+    display: 'grid',
+    gridTemplateColumns: `repeat(${columns}, 1fr)`,
+    gap: `${gap}px`,
+  }), [columns, gap]);
+
+  return <div style={style}>{children}</div>;
+}
+```
+
+### Merging Styles
+
+```tsx
+function mergeStyles(...styles: (CSSProperties | undefined)[]): CSSProperties {
+  return Object.assign({}, ...styles.filter(Boolean));
+}
+
+// Usage
+function Box({
+  style,
+  padding
+}: {
+  style?: CSSProperties;
+  padding?: number;
+}) {
+  const baseStyle: CSSProperties = {
+    boxSizing: 'border-box',
+  };
+
+  const paddingStyle: CSSProperties | undefined = padding
+    ? { padding: `${padding}px` }
+    : undefined;
+
+  return (
+    <div style={mergeStyles(baseStyle, paddingStyle, style)}>
+      Content
+    </div>
+  );
+}
+```
+
+<Callout type="info" title="When to Use Inline Styles">
+Use inline styles for truly dynamic values calculated at runtime (animations, user-defined colors, computed dimensions). Use CSS classes for static variations.
+</Callout>
+
+---
+
+## Data Attributes for Styling
+
+### State-Based Styling
+
+```css
+/* Button.module.css */
+.button {
+  padding: 8px 16px;
+  background: var(--color-primary);
+  color: white;
+}
+
+.button[data-loading='true'] {
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+.button[data-variant='secondary'] {
+  background: var(--color-secondary);
+}
+
+.button[data-size='sm'] {
+  padding: 4px 8px;
+  font-size: 14px;
+}
+
+.button[data-size='lg'] {
+  padding: 12px 24px;
+  font-size: 18px;
+}
+```
+
+```tsx
+function Button({
+  variant = 'primary',
+  size = 'md',
+  loading = false,
+  children,
+}: ButtonProps) {
+  return (
+    <button
+      className={styles.button}
+      data-variant={variant}
+      data-size={size}
+      data-loading={loading}
+    >
+      {children}
+    </button>
+  );
+}
+```
+
+### Boolean Attributes
+
+```css
+/* Toggle.module.css */
+.toggle {
+  width: 48px;
+  height: 24px;
+  background: var(--color-gray);
+  border-radius: 12px;
+}
+
+.toggle[data-checked] {
+  background: var(--color-primary);
+}
+
+.toggle[data-disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+```
+
+```tsx
+function Toggle({ checked, disabled, onChange }: ToggleProps) {
+  return (
+    <button
+      className={styles.toggle}
+      role="switch"
+      aria-checked={checked}
+      data-checked={checked || undefined}
+      data-disabled={disabled || undefined}
+      onClick={() => !disabled && onChange?.(!checked)}
+    />
+  );
+}
+```
+
+<Callout type="info" title="Attribute Presence">
+For boolean data attributes, set to `undefined` when false to remove the attribute entirely. This allows `[data-checked]` selector to work correctly.
+</Callout>
+
+---
+
+## CSS State Selectors
+
+### Interactive States
+
+```css
+/* Button.module.css */
+.button {
+  background: var(--color-primary);
+  transition: background 0.2s, transform 0.1s;
+}
+
+.button:hover {
+  background: var(--color-primary-hover);
+}
+
+.button:active {
+  transform: scale(0.98);
+}
+
+.button:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.button:disabled:hover {
+  background: var(--color-primary); /* Prevent hover state when disabled */
+}
+```
+
+### Focus Within
+
+```css
+/* Input.module.css */
+.inputWrapper {
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  padding: 8px;
+}
+
+.inputWrapper:focus-within {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px var(--color-primary-alpha);
+}
+
+.input {
+  border: none;
+  outline: none;
+  width: 100%;
+}
+```
+
+### Group Hover
+
+```css
+/* Card.module.css */
+.card {
+  padding: 16px;
+  border: 1px solid var(--color-border);
+}
+
+.card:hover .cardTitle {
+  color: var(--color-primary);
+}
+
+.card:hover .cardIcon {
+  transform: translateX(4px);
+}
+
+.cardIcon {
+  transition: transform 0.2s;
+}
+```
+
+---
+
+## Variant Patterns
+
+### Variant Object Pattern
+
+```tsx
+import { cx } from '@/utils/classNames';
+import styles from './Badge.module.css';
+
+const variants = {
+  default: styles.default,
+  success: styles.success,
+  warning: styles.warning,
+  error: styles.error,
+} as const;
+
+const sizes = {
+  sm: styles.sm,
+  md: styles.md,
+  lg: styles.lg,
+} as const;
+
+interface BadgeProps {
+  variant?: keyof typeof variants;
+  size?: keyof typeof sizes;
+  children: React.ReactNode;
+}
+
+function Badge({
+  variant = 'default',
+  size = 'md',
+  children
+}: BadgeProps) {
+  return (
+    <span className={cx(styles.badge, variants[variant], sizes[size])}>
+      {children}
+    </span>
+  );
+}
+```
+
+### Compound Variant Pattern
+
+```tsx
+type Variant = 'solid' | 'outline' | 'ghost';
+type ColorScheme = 'primary' | 'danger' | 'neutral';
+
+interface ButtonVariants {
+  variant: Variant;
+  colorScheme: ColorScheme;
+}
+
+const variantStyles: Record<`${Variant}-${ColorScheme}`, string> = {
+  'solid-primary': styles.solidPrimary,
+  'solid-danger': styles.solidDanger,
+  'solid-neutral': styles.solidNeutral,
+  'outline-primary': styles.outlinePrimary,
+  'outline-danger': styles.outlineDanger,
+  'outline-neutral': styles.outlineNeutral,
+  'ghost-primary': styles.ghostPrimary,
+  'ghost-danger': styles.ghostDanger,
+  'ghost-neutral': styles.ghostNeutral,
+};
+
+function Button({
+  variant = 'solid',
+  colorScheme = 'primary',
+  children,
+}: ButtonVariants & { children: React.ReactNode }) {
+  const variantClass = variantStyles[`${variant}-${colorScheme}`];
+
+  return (
+    <button className={cx(styles.button, variantClass)}>
+      {children}
+    </button>
+  );
+}
+```
+
+### CSS for Compound Variants
+
+```css
+/* Button.module.css */
+.button {
+  padding: 8px 16px;
+  border-radius: 4px;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+
+/* Solid variants */
+.solidPrimary {
+  background: var(--color-primary);
+  color: white;
+  border: none;
+}
+
+.solidPrimary:hover {
+  background: var(--color-primary-dark);
+}
+
+/* Outline variants */
+.outlinePrimary {
+  background: transparent;
+  color: var(--color-primary);
+  border: 1px solid var(--color-primary);
+}
+
+.outlinePrimary:hover {
+  background: var(--color-primary-light);
+}
+
+/* Ghost variants */
+.ghostPrimary {
+  background: transparent;
+  color: var(--color-primary);
+  border: none;
+}
+
+.ghostPrimary:hover {
+  background: var(--color-primary-light);
+}
+```
+
+---
+
+## When to Use Which Approach
+
+| Approach | Best For | Avoid When |
+|----------|----------|------------|
+| Template literals | Simple 2-3 class combinations | Many conditional classes |
+| classNames helper | Multiple conditional classes | Simple static classes |
+| Style objects | Dynamic runtime values | Static variations |
+| Data attributes | State-based styling, testing | Performance-critical hot paths |
+| CSS selectors | Interactive states, pseudo-elements | Complex JS-driven conditions |
+| Variant objects | Type-safe component APIs | One-off styling needs |
+
+---
+
+## Comparison: className vs data-attributes
+
+### className Approach
+
+```tsx
+// Pros: Familiar, performant
+// Cons: String concatenation, no CSS specificity control
+<button className={cx(styles.button, isActive && styles.active)} />
+```
+
+### Data Attribute Approach
+
+```tsx
+// Pros: Cleaner JSX, easy testing with data-* selectors
+// Cons: Slightly higher specificity, attribute rendering overhead
+<button className={styles.button} data-active={isActive || undefined} />
+```
+
+<Callout type="info" title="Recommendation">
+Use className for variant-based styling (size, color). Use data attributes for state-based styling (loading, expanded, selected) where the attribute also serves as a test selector.
+</Callout>
+
+---
+
+## Anti-Patterns to Avoid
+
+### String Interpolation for Class Names
+
+```tsx
+// Bad - breaks tree-shaking, harder to analyze
+const variant = 'primary';
+<button className={styles[`button${variant}`]} />
+
+// Good - explicit mapping
+const variantStyles = {
+  primary: styles.buttonPrimary,
+  secondary: styles.buttonSecondary,
+};
+<button className={variantStyles[variant]} />
+```
+
+### Inline Styles for Static Values
+
+```tsx
+// Bad - creates new object every render
+<div style={{ padding: '16px', margin: '8px' }} />
+
+// Good - use CSS classes for static styles
+<div className={styles.container} />
+```
+
+### Over-Complex Conditional Logic
+
+```tsx
+// Bad - hard to read and maintain
+<div className={`
+  ${styles.card}
+  ${isActive ? styles.active : ''}
+  ${isHovered && !isDisabled ? styles.hovered : ''}
+  ${size === 'lg' ? styles.large : size === 'sm' ? styles.small : styles.medium}
+`} />
+
+// Good - use helper function
+<div className={cx(
+  styles.card,
+  isActive && styles.active,
+  isHovered && !isDisabled && styles.hovered,
+  styles[size]
+)} />
+```

@@ -1,0 +1,470 @@
+---
+title: useEffect Patterns
+description: Mastering side effects in React with useEffect
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## Effect Mental Model
+
+Effects synchronize your component with external systems:
+
+```tsx
+useEffect(() => {
+  // Setup: connect to external system
+  const connection = createConnection(serverUrl, roomId);
+  connection.connect();
+
+  // Cleanup: disconnect from external system
+  return () => {
+    connection.disconnect();
+  };
+}, [serverUrl, roomId]); // Re-run when these change
+```
+
+| Concept | Description |
+|---------|-------------|
+| **Setup** | Code that runs after render to sync with external system |
+| **Cleanup** | Code that runs before next effect and on unmount |
+| **Dependencies** | Values that trigger re-sync when changed |
+
+<Callout type="info" title="Think Synchronization">
+Don't think "run on mount" or "run on update". Think "synchronize with this external system when these values change".
+</Callout>
+
+---
+
+## Dependency Array Patterns
+
+### No Dependencies: Run Once
+
+```tsx
+useEffect(() => {
+  // Runs after initial render only
+  analytics.pageView();
+}, []);
+```
+
+### With Dependencies: Run on Change
+
+```tsx
+useEffect(() => {
+  // Runs after initial render and when userId changes
+  fetchUserData(userId);
+}, [userId]);
+```
+
+### No Array: Run Every Render
+
+```tsx
+useEffect(() => {
+  // Runs after every render - rarely what you want
+  document.title = `Count: ${count}`;
+});
+```
+
+<Callout type="error" title="Missing Dependencies">
+Always include all values from component scope that the effect uses. The ESLint plugin `react-hooks/exhaustive-deps` catches these.
+</Callout>
+
+### Dependency Comparison
+
+React uses `Object.is` to compare dependencies:
+
+```tsx
+// Primitives: compared by value
+useEffect(() => {}, [count]); // Re-runs when count changes
+
+// Objects/Arrays: compared by reference
+useEffect(() => {}, [user]); // Re-runs when user reference changes
+
+// Functions: compared by reference (always new unless memoized)
+useEffect(() => {}, [handleClick]); // Likely re-runs every render
+```
+
+---
+
+## Cleanup Patterns
+
+### Subscriptions
+
+```tsx
+useEffect(() => {
+  const subscription = dataSource.subscribe(handleChange);
+
+  return () => {
+    subscription.unsubscribe();
+  };
+}, [dataSource]);
+```
+
+### Timers
+
+```tsx
+useEffect(() => {
+  const intervalId = setInterval(() => {
+    setCount(c => c + 1);
+  }, 1000);
+
+  return () => {
+    clearInterval(intervalId);
+  };
+}, []);
+```
+
+### Event Listeners
+
+```tsx
+useEffect(() => {
+  const handleResize = () => {
+    setWindowSize({
+      width: window.innerWidth,
+      height: window.innerHeight
+    });
+  };
+
+  window.addEventListener('resize', handleResize);
+
+  return () => {
+    window.removeEventListener('resize', handleResize);
+  };
+}, []);
+```
+
+### AbortController for Fetch
+
+```tsx
+useEffect(() => {
+  const controller = new AbortController();
+
+  fetch(url, { signal: controller.signal })
+    .then(response => response.json())
+    .then(data => setData(data))
+    .catch(error => {
+      if (error.name !== 'AbortError') {
+        setError(error);
+      }
+    });
+
+  return () => {
+    controller.abort();
+  };
+}, [url]);
+```
+
+---
+
+## Fetching Data
+
+### Basic Pattern with Race Condition Prevention
+
+```tsx
+function UserProfile({ userId }: { userId: string }) {
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+
+  useEffect(() => {
+    let ignore = false;
+
+    setLoading(true);
+    setError(null);
+
+    fetchUser(userId)
+      .then(data => {
+        if (!ignore) {
+          setUser(data);
+        }
+      })
+      .catch(err => {
+        if (!ignore) {
+          setError(err);
+        }
+      })
+      .finally(() => {
+        if (!ignore) {
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      ignore = true;
+    };
+  }, [userId]);
+
+  if (loading) return <Spinner />;
+  if (error) return <ErrorMessage error={error} />;
+  if (!user) return null;
+
+  return <UserCard user={user} />;
+}
+```
+
+<Callout type="warn" title="Race Conditions">
+Without the `ignore` flag, fast userId changes can cause responses to arrive out of order, showing stale data.
+</Callout>
+
+### Race Condition Visualization
+
+```
+userId: 1 --fetch--> [slow response]-------> setState(user1) ❌ Wrong!
+userId: 2 --fetch--> [fast response]--> setState(user2) ✓
+```
+
+The `ignore` flag prevents the first response from updating state after userId changed.
+
+---
+
+## Event Listeners
+
+### Window Events
+
+```tsx
+function useWindowScroll() {
+  const [scrollY, setScrollY] = useState(0);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      setScrollY(window.scrollY);
+    };
+
+    // Set initial value
+    handleScroll();
+
+    window.addEventListener('scroll', handleScroll, { passive: true });
+
+    return () => {
+      window.removeEventListener('scroll', handleScroll);
+    };
+  }, []);
+
+  return scrollY;
+}
+```
+
+### Document Events
+
+```tsx
+function useKeyPress(targetKey: string) {
+  const [pressed, setPressed] = useState(false);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === targetKey) {
+        setPressed(true);
+      }
+    };
+
+    const handleKeyUp = (event: KeyboardEvent) => {
+      if (event.key === targetKey) {
+        setPressed(false);
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    document.addEventListener('keyup', handleKeyUp);
+
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('keyup', handleKeyUp);
+    };
+  }, [targetKey]);
+
+  return pressed;
+}
+```
+
+---
+
+## Avoiding Infinite Loops
+
+### Mistake: Object/Array in Dependencies
+
+```tsx
+// Infinite loop: new object every render
+useEffect(() => {
+  doSomething(options);
+}, [{ theme: 'dark' }]); // New object reference each time!
+
+// Fix: move object outside or use useMemo
+const options = useMemo(() => ({ theme: 'dark' }), []);
+useEffect(() => {
+  doSomething(options);
+}, [options]);
+```
+
+### Mistake: Setting State That Triggers Effect
+
+```tsx
+// Infinite loop
+useEffect(() => {
+  setCount(count + 1); // Updates count, triggers effect, repeat
+}, [count]);
+
+// Fix: functional update doesn't need count in deps
+useEffect(() => {
+  const id = setInterval(() => {
+    setCount(c => c + 1); // No dependency on count
+  }, 1000);
+  return () => clearInterval(id);
+}, []); // Empty deps
+```
+
+### Mistake: Function in Dependencies
+
+```tsx
+function Component({ userId }: { userId: string }) {
+  // New function every render
+  const fetchData = () => fetch(`/api/user/${userId}`);
+
+  // Infinite loop potential
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]); // New reference each render
+
+  // Fix 1: include only what function uses
+  useEffect(() => {
+    fetch(`/api/user/${userId}`);
+  }, [userId]);
+
+  // Fix 2: useCallback
+  const fetchData = useCallback(() => {
+    fetch(`/api/user/${userId}`);
+  }, [userId]);
+}
+```
+
+---
+
+## When NOT to Use useEffect
+
+### Deriving State
+
+```tsx
+// Bad: useEffect for derived state
+function FilteredList({ items, filter }: Props) {
+  const [filtered, setFiltered] = useState<Item[]>([]);
+
+  useEffect(() => {
+    setFiltered(items.filter(i => i.name.includes(filter)));
+  }, [items, filter]);
+}
+
+// Good: derive during render
+function FilteredList({ items, filter }: Props) {
+  const filtered = useMemo(
+    () => items.filter(i => i.name.includes(filter)),
+    [items, filter]
+  );
+}
+```
+
+### Resetting State on Prop Change
+
+```tsx
+// Bad: useEffect to reset
+function Profile({ userId }: { userId: string }) {
+  const [comment, setComment] = useState('');
+
+  useEffect(() => {
+    setComment('');
+  }, [userId]);
+}
+
+// Good: key to reset
+<Profile key={userId} userId={userId} />
+```
+
+### Handling Events
+
+```tsx
+// Bad: useEffect for event consequences
+function Form() {
+  const [submitted, setSubmitted] = useState(false);
+
+  useEffect(() => {
+    if (submitted) {
+      sendAnalytics('form_submit');
+    }
+  }, [submitted]);
+
+  const handleSubmit = () => {
+    setSubmitted(true);
+  };
+}
+
+// Good: handle in event
+function Form() {
+  const handleSubmit = () => {
+    sendAnalytics('form_submit');
+    // ...rest of submit logic
+  };
+}
+```
+
+### Initializing Application
+
+```tsx
+// Bad: useEffect for one-time app init
+function App() {
+  useEffect(() => {
+    initializeApp();
+  }, []);
+}
+
+// Good: init before React
+initializeApp();
+
+const root = createRoot(document.getElementById('root')!);
+root.render(<App />);
+```
+
+---
+
+## Effect Patterns Summary
+
+| Pattern | When to Use | Cleanup Needed |
+|---------|-------------|----------------|
+| Data fetching | Load data based on props/state | Yes (abort/ignore flag) |
+| Subscriptions | WebSocket, event emitter | Yes (unsubscribe) |
+| DOM listeners | Window/document events | Yes (removeEventListener) |
+| Timers | Intervals, timeouts | Yes (clear) |
+| Third-party libs | jQuery plugins, D3, etc. | Yes (destroy/cleanup) |
+| Focus management | Modal opens, form validation | Sometimes |
+| Analytics | Page views, tracking | No |
+
+---
+
+## Quick Reference
+
+```tsx
+// Setup only (one-time)
+useEffect(() => {
+  oneTimeSetup();
+}, []);
+
+// Setup with cleanup
+useEffect(() => {
+  const sub = subscribe();
+  return () => sub.unsubscribe();
+}, []);
+
+// Sync with prop/state
+useEffect(() => {
+  syncWithValue(value);
+}, [value]);
+
+// Fetch with cleanup
+useEffect(() => {
+  let ignore = false;
+  fetchData().then(d => { if (!ignore) setData(d); });
+  return () => { ignore = true; };
+}, [id]);
+
+// AbortController
+useEffect(() => {
+  const controller = new AbortController();
+  fetch(url, { signal: controller.signal });
+  return () => controller.abort();
+}, [url]);
+```
