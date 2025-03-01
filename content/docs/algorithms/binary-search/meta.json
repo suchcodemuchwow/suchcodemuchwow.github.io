@@ -1,0 +1,9 @@
+{
+    "title": "Binary Search",
+    "description": "Find an element in a sorted array",
+    "pages": [
+        "index"
+    ],
+    "icon": "Search",
+    "defaultOpen": true
+}

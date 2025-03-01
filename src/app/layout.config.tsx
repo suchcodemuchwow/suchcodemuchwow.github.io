@@ -1,4 +1,25 @@
-import type { BaseLayoutProps } from 'fumadocs-ui/layouts/shared';
+import * as constants from "@/lib/constants";
+import type { Option } from "fumadocs-ui/components/layout/root-toggle";
+import type { BaseLayoutProps } from "fumadocs-ui/layouts/shared";
+
+export const pageTreeOptions: Option[] = [
+	{
+		title: "Algorithms",
+		description: "Data Structures and Algorithms",
+		url: "/docs/algorithms",
+	},
+	{
+		title: "System Design",
+		description:
+			"Scalability, Availability, Reliability, Performance, and Resilience",
+		url: "/docs/system-design",
+	},
+	{
+		title: "Behavioral",
+		description: "Behavioral questions",
+		url: "/docs/behavioral",
+	},
+];
 
 /**
  * Shared layout configurations
@@ -8,26 +29,30 @@ import type { BaseLayoutProps } from 'fumadocs-ui/layouts/shared';
  * Docs Layout: app/docs/layout.tsx
  */
 export const baseOptions: BaseLayoutProps = {
-  nav: {
-    title: (
-      <>
-        <svg
-          width="24"
-          height="24"
-          xmlns="http://www.w3.org/2000/svg"
-          aria-label="Logo"
-        >
-          <circle cx={12} cy={12} r={12} fill="currentColor" />
-        </svg>
-        My App
-      </>
-    ),
-  },
-  links: [
-    {
-      text: 'Documentation',
-      url: '/docs',
-      active: 'nested-url',
-    },
-  ],
+	githubUrl: constants.GITHUB_URL,
+	nav: {
+		title: (
+			<span className="font-medium [.uwu_&]:hidden [header_&]:text-[15px]">
+				{constants.WEBSITE_NAME}
+			</span>
+		),
+		transparentMode: "top",
+	},
+	links: [
+		{
+			text: "Algorithms",
+			url: "/docs/algorithms",
+			active: "none",
+		},
+		{
+			text: "System Design",
+			url: "/docs/system-design",
+			active: "url",
+		},
+		{
+			text: "Behavioral",
+			url: "/docs/behavioral",
+			active: "nested-url",
+		},
+	],
 };

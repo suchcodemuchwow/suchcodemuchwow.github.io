@@ -1,0 +1,13 @@
+{
+    "title": "Getting Started",
+    "description": "Learn about the basics of algorithms",
+    "pages": [
+        "index",
+        "how-to-study",
+        "interview-process",
+        "patterns",
+        "runtime"
+    ],
+    "defaultOpen": true,
+    "icon": "Rocket"
+}
