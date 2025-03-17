@@ -1,26 +1,60 @@
 # suchcodemuchwow.github.io
 
-This is a Next.js application generated with
-[Create Fumadocs](https://github.com/fuma-nama/fumadocs).
+[suchcodemuchwow.github.io](https://suchcodemuchwow.github.io)
 
-Run development server:
+A modern documentation site built with Next.js 15 and Fumadocs.
+
+## 🚀 Features
+
+- Built on Next.js 15 with React 19
+- Documentation powered by Fumadocs MDX
+- Responsive design with Tailwind CSS
+- Syntax highlighting with Shiki
+- Full TypeScript support
+
+## 🛠️ Development
 
 ```bash
-npm run dev
-# or
+# Install dependencies
+pnpm install
+
+# Start development server
 pnpm dev
-# or
-yarn dev
+
+# Clean installation and restart dev server
+pnpm dev:clean
+
+# Build for production
+pnpm build
+
+# Start production server
+pnpm start
 ```
 
-Open http://localhost:3000 with your browser to see the result.
+## 📁 Project Structure
 
-## Learn More
+- `/content/docs` - Documentation content (MDX files)
+- `/src/app` - Next.js application routes
+- `/src/components` - Reusable UI components
+- `/src/lib` - Utility functions and shared code
 
-To learn more about Next.js and Fumadocs, take a look at the following
-resources:
+## 📚 Documentation
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js
-  features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-- [Fumadocs](https://fumadocs.vercel.app) - learn about Fumadocs
+This project uses [Fumadocs](https://fumadocs.vercel.app) for documentation management:
+
+- MDX for content authoring
+- Custom frontmatter schema
+- Automatic navigation generation
+- Search functionality
+
+## 📦 Technologies
+
+- [Next.js](https://nextjs.org/)
+- [React](https://react.dev/)
+- [Fumadocs](https://fumadocs.vercel.app)
+- [Tailwind CSS](https://tailwindcss.com/)
+- [TypeScript](https://www.typescriptlang.org/)
+
+## 📄 License
+
+[MIT](LICENSE)
