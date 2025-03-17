@@ -1,7 +1,6 @@
 {
   "title": "Algorithms",
-  "description": "The docs framework",
-  "icon": "Building2",
+  "icon": "DraftingCompass",
   "root": true,
   "pages": [
     "getting-started",

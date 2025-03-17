@@ -1,9 +1,9 @@
 {
-    "title": "Two Pointers",
-    "description": "Two Pointers",
+    "title": "Depth First Search",
+    "description": "Depth First Search is a graph traversal algorithm that explores as far as possible along each branch before backtracking.",
     "pages": [
         "index"
     ],
     "icon": "ArrowLeftRight",
-    "defaultOpen": true
+    "defaultOpen": false
 }

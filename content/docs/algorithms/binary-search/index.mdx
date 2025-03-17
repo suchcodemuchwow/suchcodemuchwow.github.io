@@ -1,10 +1,70 @@
 ---
 title: Introduction
 description: Binary Search Introduction
-defaultOpen: true
 ---
 
-# Binary Search
 
-Binary search is a technique used to find an element in a sorted array.
+**Binary Search: A Step-by-Step Explanation**
 
+**What is Binary Search?**
+Binary search is an efficient algorithm for finding an item from a sorted list of items. It works by
+repeatedly dividing in half the portion of the list that could contain the item, until you've narrowed
+down the possible locations to just one.
+
+**How Does Binary Search Work?**
+1. **Initialize Pointers:**
+   - Set `low` to 0 (the first index) and `high` to `n-1` (the last index of the array).
+
+2. **Loop Until Target Found or Range Exhausted:**
+   - While `low` is less than or equal to `high`:
+     - Calculate `mid` as the average of `low` and `high`.
+     - Compare the element at `mid` with the target value.
+
+3. **Adjust Pointers Based on Comparison:**
+   - If the middle element is equal to the target, return `mid` (success).
+   - If the middle element is less than the target, set `low` to `mid + 1` to search the right half.
+   - If the middle element is greater than the target, set `high` to `mid - 1` to search the left half.
+
+4. **Return Result:**
+   - If the loop exits without finding the target, return -1 or a similar value indicating the target was
+not found.
+
+**Example Implementation (Iterative):**
+
+```python
+def binary_search(arr, target):
+    low = 0
+    high = len(arr) - 1
+
+    while low <= high:
+        mid = (low + high) // 2
+        if arr[mid] == target:
+            return mid
+        elif arr[mid] < target:
+            low = mid + 1
+        else:
+            high = mid - 1
+    return -1
+```
+
+**Handling Edge Cases:**
+- **Empty Array:** If the array is empty, immediately return -1.
+- **Single Element:** Directly compare the single element with the target.
+- **Duplicates:** To find the first occurrence of a value, continue searching left after finding a match.
+To find any occurrence, return upon the first match.
+
+**Time Complexity:**
+- **Average Case:** O(log n)
+- **Worst Case:** O(log n) (when the target is at the start or end of the array)
+
+**Space Complexity:**
+- O(1), as it uses a constant amount of extra space.
+
+**When to Use Binary Search:**
+- When dealing with sorted arrays.
+- For efficient searching in large datasets where time complexity is critical.
+
+**Conclusion:**
+Binary search is a highly efficient algorithm for searching in sorted arrays. By understanding its
+mechanics and practicing its implementation, you can enhance your problem-solving skills, particularly in
+scenarios requiring optimal performance during tech interviews or software development.

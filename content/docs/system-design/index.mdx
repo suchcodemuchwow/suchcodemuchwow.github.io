@@ -1,17 +1,148 @@
 ---
-title: System Design
-description: System Design
+title: System Design Basics
+description: Learn the key characteristics of distributed systems and how to design scalable, reliable, and efficient systems for tech interviews.
 ---
 
-## Code Block
+Building a scalable, high-performance, and maintainable system is no small feat. It requires a deep understanding of the problem domain, the underlying technologies, and the trade-offs involved. Whether you're designing a ride-sharing app, a fintech platform, or a social media network, the principles of distributed systems remain the same.
 
-```js
-console.log('Hello World');
-```
+In this guide, we'll break down the key characteristics of distributed systems using real-world examples and storytelling to make the concepts stick. By the end, you'll have a solid foundation for tackling system design interviews.
 
-## Cards
+## Key Questions to Answer in System Design
 
-<Cards>
-  <Card title="Learn more about Next.js" href="https://nextjs.org/docs" />
-  <Card title="Learn more about Fumadocs" href="https://fumadocs.vercel.app" />
-</Cards>
+When designing a system, you need to answer critical questions like:
+- What are the core components of the system?
+- How do these components interact with each other?
+- What are the trade-offs involved in choosing one design over another?
+
+Investing in scalability and reliability **before it's needed** might seem like overkill, but it’s crucial to plan for future growth. Otherwise, you risk building a system that crumbles under pressure.
+
+## Key Concepts of Distributed Systems
+
+We’ll cover essential distributed system concepts, including:
+- Consistent Hashing
+- CAP Theorem
+- Load Balancing
+- Caching
+- Data Partitioning
+- Indexes
+- Proxies
+- Queues
+- And more
+
+But first, let’s dive into the **key characteristics** of a scalable system, which we’ll refer to as **SAREM**:
+- **S**calability
+- **A**vailability
+- **R**eliability
+- **E**fficiency (Performance)
+- **M**aintainability
+
+---
+
+## Characteristics of a Scalable System - SAREM
+
+### 1. Scalability
+Imagine you’ve built a ride-sharing app that’s become a hit in your city. Now, users in other cities are clamoring to use your app. You started with a cheap server to test your MVP, but now you need to scale. If you didn’t plan for this growth, you’re in trouble.
+
+<Callout title="In a Nutshell">
+Scalability is the ability of a system to handle increased demand by adding resources.
+</Callout>
+
+Systems scale for various reasons:
+- **User Growth**: More people are using your app.
+- **Data Growth**: The amount of data you’re storing is increasing.
+- **Usage Growth**: Users are interacting with your app more frequently.
+
+However, scaling isn’t always straightforward. As your system grows, performance can degrade due to factors like network latency or poorly distributed tasks. A scalable system is designed to handle growth in all dimensions without breaking a sweat.
+
+#### Real-World Example: Ride-Sharing App
+When your app expands to new cities, you’ll need to:
+- Add more servers to handle increased traffic.
+- Distribute your database to store data closer to users.
+- Implement load balancing to evenly distribute requests.
+
+If you didn’t plan for scalability, your app might crash under the weight of its own success.
+
+---
+
+### 2. Reliability
+Your ride-sharing app is now scalable, but what happens if a server crashes? Or if a hacker tries to disrupt your service? Reliability is the system’s ability to **keep functioning** even when things go wrong.
+
+<Callout title="In a Nutshell">
+Reliability is the probability that a system will perform its intended function without failure over a specified period of time.
+</Callout>
+
+#### Real-World Example: Fintech App
+Imagine you’re building a fintech app that processes millions of transactions daily. If your system fails, users could lose money, and your reputation could be ruined. To ensure reliability:
+- Use redundant servers so that if one fails, another takes over.
+- Implement robust error handling and monitoring.
+- Regularly test your system for edge cases.
+
+---
+
+### 3. Availability
+Availability is closely related to reliability but focuses on **uptime**. A highly available system ensures that users can access it whenever they need to.
+
+<Callout title="In a Nutshell">
+Availability is the percentage of time a system remains operational.
+</Callout>
+
+#### Real-World Example: Social Media Platform
+If your social media platform goes down, users can’t post, like, or share content. To maximize availability:
+- Use distributed systems to avoid single points of failure.
+- Implement failover mechanisms to switch to backup systems during outages.
+- Monitor uptime and respond quickly to incidents.
+
+---
+
+### 4. Efficiency (Performance)
+Efficiency is about how well your system uses resources to deliver results. A performant system responds quickly and uses minimal resources.
+
+<Callout title="In a Nutshell">
+Efficiency measures how effectively a system uses resources like CPU, memory, and bandwidth to achieve its goals.
+</Callout>
+
+#### Real-World Example: E-Commerce Platform
+On an e-commerce platform, users expect fast search results and quick checkout times. To improve efficiency:
+- Use caching to reduce database load.
+- Optimize database queries and indexes.
+- Implement content delivery networks (CDNs) to serve static assets faster.
+
+---
+
+### 5. Maintainability
+A maintainable system is easy to update, debug, and extend. As your system grows, you’ll need to add new features, fix bugs, and adapt to changing requirements.
+
+<Callout title="In a Nutshell">
+Maintainability is the ease with which a system can be modified to correct faults, improve performance, or adapt to a changed environment.
+</Callout>
+
+#### Real-World Example: Streaming Service
+If you’re building a streaming service, you’ll need to regularly update the app with new features and bug fixes. To ensure maintainability:
+- Write clean, modular code.
+- Use version control and CI/CD pipelines.
+- Document your system thoroughly.
+
+---
+
+## Putting It All Together: Designing a Ride-Sharing App
+
+Let’s apply SAREM to a real-world scenario: designing a ride-sharing app.
+
+1. **Scalability**: Use microservices to handle different parts of the app (e.g., ride matching, payment processing). Implement load balancing and auto-scaling to handle traffic spikes.
+2. **Reliability**: Use redundant databases and servers. Implement robust error handling and monitoring.
+3. **Availability**: Distribute your servers across multiple regions. Use failover mechanisms to ensure uptime.
+4. **Efficiency**: Cache frequently accessed data (e.g., driver locations). Optimize database queries and use CDNs for static assets.
+5. **Maintainability**: Write modular code and use CI/CD pipelines for seamless updates.
+
+By focusing on SAREM, you can build a system that’s ready to scale, reliable under pressure, and easy to maintain.
+
+---
+
+## Key Takeaways
+- **Scalability**: Plan for growth in users, data, and usage.
+- **Reliability**: Build a system that can handle failures gracefully.
+- **Availability**: Ensure your system is always accessible.
+- **Efficiency**: Optimize resource usage for better performance.
+- **Maintainability**: Design your system for easy updates and debugging.
+
+With these principles in mind, you’re well on your way to acing system design interviews and building robust distributed systems.
