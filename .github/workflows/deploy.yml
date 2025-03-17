@@ -19,49 +19,23 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
+  cache-and-install:
     runs-on: ubuntu-latest
+    
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Detect PNPM version
-        id: pnpm-version
-        run: |
-          PNPM_VERSION=$(node -e "try { const pkg = require('./package.json'); console.log(pkg.packageManager ? pkg.packageManager.replace('pnpm@', '') : '10.x') } catch (e) { console.log('10.x') }")
-          echo "version=$PNPM_VERSION" >> $GITHUB_OUTPUT
-          echo "Detected PNPM version: $PNPM_VERSION"
-
-      - name: Setup PNPM
-        uses: pnpm/action-setup@v3
+      - uses: pnpm/action-setup@v4
+        name: Install pnpm
         with:
-          version: ${{ steps.pnpm-version.outputs.version }}
           run_install: false
 
-      - name: Detect Node.js version
-        id: node-version
-        run: |
-          NODE_VERSION=$(node -e "try { const pkg = require('./package.json'); console.log(pkg.engines && pkg.engines.node ? pkg.engines.node : '20') } catch (e) { console.log('20') }")
-          echo "version=$NODE_VERSION" >> $GITHUB_OUTPUT
-          echo "Detected Node.js version: $NODE_VERSION"
-
-      - name: Setup Node.js
+      - name: Install Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: ${{ steps.node-version.outputs.version }}
-
-      - name: Get pnpm store directory
-        shell: bash
-        run: |
-          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
-
-      - name: Setup pnpm cache
-        uses: actions/cache@v4
-        with:
-          path: ${{ env.STORE_PATH }}
-          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-
+          node-version: 20
+          cache: 'pnpm'
 
       - name: Install dependencies
         run: pnpm install
@@ -76,7 +50,6 @@ jobs:
         uses: actions/upload-pages-artifact@v3
         with:
           path: ./dist
-
   deploy:
     environment:
       name: github-pages
