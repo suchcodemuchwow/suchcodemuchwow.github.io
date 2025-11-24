@@ -1,7 +1,6 @@
 {
     "pages": [
         "algorithms",
-        "system-design",
-        "behavioral"
+        "system-design"
     ]
 }
