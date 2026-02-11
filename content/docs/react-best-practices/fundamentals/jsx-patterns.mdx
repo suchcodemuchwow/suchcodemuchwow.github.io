@@ -80,20 +80,14 @@ You cannot add attributes to short fragments. If you need a key, use `React.Frag
 ### Guard Clauses for Early Returns
 
 ```tsx
-// Prefer early returns over nested ternaries
-function UserProfile({ userId }: { userId: string | null }) {
-  if (!userId) {
+// Early returns work well for non-hook logic
+function UserProfile({ user }: { user: User | null }) {
+  if (!user) {
     return <LoginPrompt />;
   }
 
-  const { data: user, isLoading, error } = useUser(userId);
-
-  if (isLoading) {
-    return <Spinner />;
-  }
-
-  if (error) {
-    return <ErrorMessage error={error} />;
+  if (!user.isActive) {
+    return <InactiveMessage />;
   }
 
   return (
@@ -103,7 +97,33 @@ function UserProfile({ userId }: { userId: string | null }) {
     </div>
   );
 }
+
+// When hooks are involved, split into components
+function UserProfileContainer({ userId }: { userId: string | null }) {
+  if (!userId) {
+    return <LoginPrompt />;
+  }
+  return <UserProfileContent userId={userId} />;
+}
+
+function UserProfileContent({ userId }: { userId: string }) {
+  const { data: user, isLoading, error } = useUser(userId);
+
+  if (isLoading) return <Spinner />;
+  if (error) return <ErrorMessage error={error} />;
+
+  return (
+    <div>
+      <h1>{user.name}</h1>
+      <p>{user.bio}</p>
+    </div>
+  );
+}
 ```
+
+<Callout type="warn" title="Hooks Rule">
+Never call hooks after an early return. Hooks must run in the same order on every render. Split into separate components if you need conditional logic before hooks.
+</Callout>
 
 ---
 
